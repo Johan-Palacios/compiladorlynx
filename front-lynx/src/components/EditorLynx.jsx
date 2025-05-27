@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Editor } from '@monaco-editor/react';
-import { AlertCircle, CheckCircle, Code, Play, FileText, Zap, TreePine, Settings, Lightbulb, Download, Upload, Copy, RotateCcw } from 'lucide-react';
+import { AlertCircle, CheckCircle, Code, Play, FileText, Zap, TreePine, Settings, Lightbulb, Download, Upload, Copy, RotateCcw, Brain } from 'lucide-react';
 
 export default function LynxEditorMejorado() {
   const [codigo, setCodigo] = useState(`// Ejemplo completo de Lynx
@@ -111,25 +111,19 @@ fun saludar(nombre) {
       defaultToken: 'invalid',
       keywords: palabrasReservadas,
       builtins: funcionesBuiltIn,
-
       tokenizer: {
         root: [
           [/\/\/.*$/, 'comment'],
           [/\/\*/, 'comment', '@comment'],
-
           [/\b(?:val|si|sino|sinosi|mientras|para|fun|retornar|imprimir|verdadero|falso|nulo|y|o|no|hacer|salir|en|repetir|hasta|intentar|capturar|segun|caso|predeterminado|finalmente|parar)\b/, 'keyword'],
-
           [/\b(?:imprimir|leer|longitud|tipo|convertir|redondear|absoluto|maximo|minimo|aleatorio)\b/, 'predefined'],
-
           [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
           [/0[xX][0-9a-fA-F]+/, 'number.hex'],
           [/\d+/, 'number'],
-
           [/"([^"\\]|\\.)*$/, 'string.invalid'],
           [/"/, 'string', '@string'],
           [/'([^'\\]|\\.)*$/, 'string.invalid'],
           [/'/, 'string', '@string_single'],
-
           [/[a-zA-Z_][a-zA-Z0-9_]*/, {
             cases: {
               '@keywords': 'keyword',
@@ -137,31 +131,24 @@ fun saludar(nombre) {
               '@default': 'identifier'
             }
           }],
-
-          // Operadores
           [/[+\-*\/%]/, 'operator.arithmetic'],
           [/[=!<>]=?/, 'operator.comparison'],
           [/[&|^~]/, 'operator.bitwise'],
           [/[(){}[\]]/, 'delimiter.bracket'],
           [/[,;:.]/, 'delimiter'],
           [/=/, 'operator.assignment'],
-
-          // Espacios en blanco
           [/[ \t\r\n]+/, 'white'],
         ],
-
         comment: [
           [/[^\/*]+/, 'comment'],
           [/\*\//, 'comment', '@pop'],
           [/[\/*]/, 'comment']
         ],
-
         string: [
           [/[^\\"]+/, 'string'],
           [/\\./, 'string.escape'],
           [/"/, 'string', '@pop']
         ],
-
         string_single: [
           [/[^\\']+/, 'string'],
           [/\\./, 'string.escape'],
@@ -193,7 +180,6 @@ fun saludar(nombre) {
           });
         });
 
-        // Snippets de estructuras
         suggestions.push(
           {
             label: 'si-completo',
@@ -233,7 +219,6 @@ fun saludar(nombre) {
           }
         );
 
-        // Variables declaradas
         variablesDeclaradas.forEach(variable => {
           suggestions.push({
             label: variable,
@@ -245,7 +230,6 @@ fun saludar(nombre) {
           });
         });
 
-        // Funciones declaradas
         funcionesDeclaradas.forEach(funcion => {
           suggestions.push({
             label: funcion,
@@ -258,12 +242,10 @@ fun saludar(nombre) {
           });
         });
 
-        // Funciones built-in
         funcionesBuiltIn.forEach(funcion => {
           let insertText = `${funcion}($1)`;
           let documentation = `Función integrada: ${funcion}`;
 
-          // Documentación específica para funciones conocidas
           switch (funcion) {
             case 'imprimir':
               documentation = 'Imprime valores en la consola';
@@ -294,7 +276,6 @@ fun saludar(nombre) {
       }
     });
 
-    // Proveedor de información de hover
     monaco.languages.registerHoverProvider('lynx', {
       provideHover: (model, position) => {
         const word = model.getWordAtPosition(position);
@@ -317,7 +298,6 @@ fun saludar(nombre) {
       }
     });
 
-    // Tema personalizado mejorado
     monaco.editor.defineTheme('lynx-theme-advanced', {
       base: 'vs-dark',
       inherit: true,
@@ -355,7 +335,6 @@ fun saludar(nombre) {
     });
   }, [variablesDeclaradas, funcionesDeclaradas]);
 
-  // Validación en tiempo real mejorada
   const validarCodigoTiempoReal = useCallback(async (codigoTexto) => {
     if (!codigoTexto.trim() || estadoConexion !== 'conectado') return;
 
@@ -369,14 +348,11 @@ fun saludar(nombre) {
       if (response.ok) {
         const data = await response.json();
 
-        // Extraer símbolos del código
         extraerSimbolos(codigoTexto);
 
-        // Marcar errores y warnings en el editor
         if (editorRef.current && monacoRef.current) {
           const markers = [];
 
-          // Errores léxicos
           data.errores.forEach((error, index) => {
             markers.push({
               severity: monacoRef.current.MarkerSeverity.Error,
@@ -389,19 +365,17 @@ fun saludar(nombre) {
             });
           });
 
-          // Análisis adicional para warnings
           const lineas = codigoTexto.split('\n');
           const warningsEncontrados = [];
 
           lineas.forEach((linea, indiceLinea) => {
-            // Warning: variables no utilizadas (simplificado)
             const declaracionVar = linea.match(/val\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
             if (declaracionVar) {
               const nombreVar = declaracionVar[1];
               const usoVar = new RegExp(`\\b${nombreVar}\\b`, 'g');
               const usosEnCodigo = (codigoTexto.match(usoVar) || []).length;
 
-              if (usosEnCodigo <= 1) { // Solo la declaración
+              if (usosEnCodigo <= 1) {
                 warningsEncontrados.push(`Variable '${nombreVar}' declarada pero no utilizada`);
                 markers.push({
                   severity: monacoRef.current.MarkerSeverity.Warning,
@@ -430,7 +404,6 @@ fun saludar(nombre) {
     }
   }, [estadoConexion, extraerSimbolos]);
 
-  // Efecto para validación en tiempo real con debounce
   useEffect(() => {
     if (validacionTiempoReal && codigo.trim()) {
       if (validationTimeoutRef.current) {
@@ -461,12 +434,19 @@ fun saludar(nombre) {
     }
 
     setCargando(true);
-
-    let url = 'http://localhost:8000/analizar';
-    if (tipo === 'lexico') {
-      url = 'http://localhost:8000/analizar-lexico';
-    } else if (tipo === 'sintactico') {
-      url = 'http://localhost:8000/analizar-sintactico';
+    let url;
+    switch (tipo) {
+      case 'lexico':
+        url = 'http://localhost:8000/analizar-lexico';
+        break;
+      case 'sintactico':
+        url = 'http://localhost:8000/analizar-sintactico';
+        break;
+      case 'semantico':
+        url = 'http://localhost:8000/analizar-semantico';
+        break;
+      default:
+        url = 'http://localhost:8000/analizar';
     }
 
     try {
@@ -495,42 +475,6 @@ fun saludar(nombre) {
     }
   };
 
-  const ejecutar = async () => {
-    if (!codigo.trim()) {
-      alert('Por favor, ingresa código para ejecutar');
-      return;
-    }
-
-    if (estadoConexion !== 'conectado') {
-      alert('No hay conexión con el servidor backend');
-      return;
-    }
-
-    setCargando(true);
-    setResultado('');
-
-    try {
-      const response = await fetch('http://localhost:8000/ejecutar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error HTTP: ${response.status}`);
-      }
-
-      const data = await response.json();
-      setResultado(data.resultado || data.error || 'Ejecución completada');
-
-    } catch (error) {
-      console.error('Error:', error);
-      setResultado(`Error de ejecución: ${error.message}`);
-    } finally {
-      setCargando(false);
-    }
-  };
-
   const limpiar = () => {
     setCodigo('');
     setTokens([]);
@@ -541,7 +485,6 @@ fun saludar(nombre) {
     setVariablesDeclaradas(new Set());
     setFuncionesDeclaradas(new Set());
 
-    // Limpiar marcadores del editor
     if (editorRef.current && monacoRef.current) {
       monacoRef.current.editor.setModelMarkers(
         editorRef.current.getModel(),
@@ -583,7 +526,6 @@ fun saludar(nombre) {
     const indent = nivel * 20;
     const nodeId = `node-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Valor primitivo
     if (node.tipo_primitivo && node.valor !== undefined) {
       const colorClass = {
         'str': 'bg-green-100 border-green-300 text-green-800',
@@ -603,7 +545,6 @@ fun saludar(nombre) {
       );
     }
 
-    // Lista
     if (node.tipo === 'lista' && node.elementos) {
       return (
         <div key={nodeId} className="my-2" style={{ marginLeft: indent }}>
@@ -625,7 +566,6 @@ fun saludar(nombre) {
       );
     }
 
-    // Nodo AST
     if (typeof node === 'object' && node !== null && node.tipo) {
       const colors = {
         'DeclaracionVariable': 'bg-blue-500',
@@ -671,11 +611,7 @@ fun saludar(nombre) {
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-
-    // Configurar lenguaje avanzado
     configurarLynxAvanzado(monaco);
-
-    // Extraer símbolos iniciales
     extraerSimbolos(codigo);
   };
 
@@ -708,7 +644,6 @@ fun saludar(nombre) {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
             <Code className="text-blue-600" />
@@ -717,8 +652,6 @@ fun saludar(nombre) {
           <p className="text-gray-600 mb-4">
             Editor con análisis en tiempo real, autocompletado inteligente y validación sintáctica
           </p>
-
-          {/* Estado de conexión */}
           <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border ${getEstadoConexionStyle()}`}>
             <div className={`w-2 h-2 rounded-full ${estadoConexion === 'conectado' ? 'bg-green-500' : estadoConexion === 'desconectado' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
             {getEstadoConexionTexto()}
@@ -726,7 +659,6 @@ fun saludar(nombre) {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* Editor */}
           <div className="bg-white rounded-lg shadow-sm">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center">
               <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
@@ -754,7 +686,6 @@ fun saludar(nombre) {
             </div>
 
             <div className="p-4">
-              {/* Toolbar del editor */}
               <div className="flex gap-2 mb-4 flex-wrap">
                 <button
                   onClick={copiarCodigo}
@@ -789,7 +720,6 @@ fun saludar(nombre) {
                 </button>
               </div>
 
-              {/* Editor Monaco */}
               <div className="border rounded-lg overflow-hidden">
                 <Editor
                   height="500px"
@@ -823,8 +753,7 @@ fun saludar(nombre) {
                 />
               </div>
 
-              {/* Botones de acción */}
-              <div className="flex gap-3 mt-4">
+              <div className="flex gap-3 mt-4 flex-wrap">
                 <button
                   onClick={() => analizar('lexico')}
                   disabled={cargando}
@@ -842,6 +771,14 @@ fun saludar(nombre) {
                   {cargando ? 'Analizando...' : 'Análisis Sintáctico'}
                 </button>
                 <button
+                  onClick={() => analizar('semantico')}
+                  disabled={cargando}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white rounded-lg transition-colors"
+                >
+                  <Brain size={16} />
+                  {cargando ? 'Analizando...' : 'Análisis Semántico'}
+                </button>
+                <button
                   onClick={() => analizar('completo')}
                   disabled={cargando}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg transition-colors"
@@ -849,21 +786,11 @@ fun saludar(nombre) {
                   <Code size={16} />
                   {cargando ? 'Analizando...' : 'Análisis Completo'}
                 </button>
-                {/* <button */}
-                {/*   onClick={ejecutar} */}
-                {/*   disabled={cargando} */}
-                {/*   className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white rounded-lg transition-colors" */}
-                {/* > */}
-                {/*   <Play size={16} /> */}
-                {/*   {cargando ? 'Ejecutando...' : 'Ejecutar'} */}
-                {/* </button> */}
               </div>
             </div>
           </div>
 
-          {/* Panel de resultados */}
           <div className="space-y-6">
-            {/* Errores y Warnings */}
             {(errores.length > 0 || warnings.length > 0) && (
               <div className="bg-white rounded-lg shadow-sm">
                 <div className="p-4 border-b border-gray-200">
@@ -895,24 +822,6 @@ fun saludar(nombre) {
               </div>
             )}
 
-            {/* Resultado de ejecución */}
-            {/* {resultado && ( */}
-            {/*   <div className="bg-white rounded-lg shadow-sm"> */}
-            {/*     <div className="p-4 border-b border-gray-200"> */}
-            {/*       <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2"> */}
-            {/*         <Play className="text-green-500" size={20} /> */}
-            {/*         Resultado de Ejecución */}
-            {/*       </h3> */}
-            {/*     </div> */}
-            {/*     <div className="p-4"> */}
-            {/*       <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap"> */}
-            {/*         {resultado} */}
-            {/*       </pre> */}
-            {/*     </div> */}
-            {/*   </div> */}
-            {/* )} */}
-
-            {/* Tokens */}
             {tokens.length > 0 && (
               <div className="bg-white rounded-lg shadow-sm">
                 <div className="p-4 border-b border-gray-200">
@@ -939,7 +848,7 @@ fun saludar(nombre) {
 
                         return (
                           <div key={index} className={`px-3 py-2 rounded-lg border text-sm ${colorClass}`}>
-                            <div className="font-medium">Lexema: {token.lexema || token.valor}</div>
+                            <div className="font-medium">Lexema: {token.lexema}</div>
                             <div className="text-xs opacity-75">Tipo: {token.tipo}</div>
                             <div className="text-xs opacity-75">Línea: {token.linea}</div>
                             <div className="text-xs opacity-75">Columna: {token.columna}</div>
@@ -951,7 +860,7 @@ fun saludar(nombre) {
                 </div>
               </div>
             )}
-            {/* AST */}
+
             {ast && (
               <div className="bg-white rounded-lg shadow-sm">
                 <div className="p-4 border-b border-gray-200 flex justify-between items-center">
@@ -976,7 +885,6 @@ fun saludar(nombre) {
               </div>
             )}
 
-            {/* Información de estado */}
             <div className="bg-white rounded-lg shadow-sm">
               <div className="p-4 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -1018,10 +926,9 @@ fun saludar(nombre) {
           </div>
         </div>
 
-        {/* Footer */}
         <div className="mt-8 text-center text-gray-500 text-sm">
           <p>Editor Lynx v2.0 - Desarrollado con React y Monaco Editor</p>
-          <p>Soporte para análisis léxico, sintáctico y ejecución de código</p>
+          <p>Soporte para análisis léxico, sintáctico, semántico y ejecución de código</p>
         </div>
       </div>
     </div>

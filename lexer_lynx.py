@@ -80,7 +80,8 @@ def t_NUMERO(t):
     return t
 
 def t_CADENA(t):
-    r'\"([a-zA-Z0-9@\'#$%^/=_\-\}\{\.\,\<\>\?\`\~\)\(\*\!\+\ \[\]])*\"|\'([a-zA-Z0-9@\'#$%^/=_\-\}\{\.\,\<\>\?\`\~\)\(\*\!\+\ \[\]])*\''
+    r'"[^"]*"|\'[^\']*\''
+    t.value = t.value[1:-1]
     return t
 
 def t_COMENTARIO_BLOQUE(t):

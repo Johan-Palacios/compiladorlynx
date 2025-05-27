@@ -177,7 +177,8 @@ def p_valor(p):
     '''valor : numero
             | CADENA
             | ID
-            | expresion_concatenacion'''
+            | expresion_concatenacion
+            | expresion_aritmetica'''  # Agregar esta línea
     p[0] = p[1]
 
 def p_numero(p):
@@ -192,7 +193,8 @@ def p_numero(p):
 
 # Expresiones
 def p_expresion(p):
-    '''expresion : expresion_logica'''
+    '''expresion : expresion_logica
+                | expresion_aritmetica'''  # Agregar esta línea
     p[0] = p[1]
 
 def p_expresion_logica(p):
@@ -302,6 +304,7 @@ def p_elemento_imprimir_list(p):
     else:
         p[0] = p[1] + [p[3]]
 
+# Cambiar esta función:
 def p_elemento_imprimir(p):
     '''elemento_imprimir : CADENA
                         | numero

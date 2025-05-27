@@ -1,16 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Editor } from '@monaco-editor/react';
-import { AlertCircle, CheckCircle, Code, Play, FileText, Zap, TreePine, Settings } from 'lucide-react';
+import { AlertCircle, CheckCircle, Code, Play, FileText, Zap, TreePine, Settings, Lightbulb, Download, Upload, Copy, RotateCcw } from 'lucide-react';
 
-export default function LynxEditorAvanzado() {
+export default function LynxEditorMejorado() {
   const [codigo, setCodigo] = useState(`// Ejemplo completo de Lynx
 val mensaje = "Bienvenido a Lynx"
 imprimir(mensaje)
 
 // Variables y operaciones
 val x = 10
-val y = 20
-val suma = x + y
+val a = 20
+val suma = x + a
 
 si (suma > 25) {
   imprimir("La suma es mayor a 25:", suma)
@@ -35,174 +35,388 @@ fun saludar(nombre) {
   imprimir("¡Hola", nombre + "!")
   retornar "Saludo completado"
 }`);
-  
+
   const [tokens, setTokens] = useState([]);
   const [errores, setErrores] = useState([]);
+  const [warnings, setWarnings] = useState([]);
   const [ast, setAst] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [validacionTiempoReal, setValidacionTiempoReal] = useState(true);
+  const [variablesDeclaradas, setVariablesDeclaradas] = useState(new Set());
+  const [funcionesDeclaradas, setFuncionesDeclaradas] = useState(new Set());
+  const [estadoConexion, setEstadoConexion] = useState('desconocido');
+  const [resultado, setResultado] = useState('');
+  const [mostrarAST, setMostrarAST] = useState(false);
+
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
+  const validationTimeoutRef = useRef(null);
 
-  // Configuración del lenguaje Lynx para Monaco
-  useEffect(() => {
-    const configurarLynx = (monaco) => {
-      // Registrar el lenguaje Lynx
-      monaco.languages.register({ id: 'lynx' });
+  const palabrasReservadas = [
+    'val', 'si', 'sino', 'sinosi', 'mientras', 'para', 'fun', 'retornar',
+    'imprimir', 'verdadero', 'falso', 'nulo', 'y', 'o', 'no', 'hacer',
+    'salir', 'en', 'repetir', 'hasta', 'intentar', 'capturar', 'segun',
+    'caso', 'predeterminado', 'finalmente', 'parar'
+  ];
 
-      // Definir tokens y sintaxis
-      monaco.languages.setMonarchTokensProvider('lynx', {
-        tokenizer: {
-          root: [
-            // Palabras reservadas
-            [/\b(val|si|sino|sinosi|mientras|para|fun|retornar|imprimir|verdadero|falso|nulo|y|o|no|hacer|salir|en|repetir|hasta|intentar|capturar|segun|caso|predeterminado|finalmente|parar)\b/, 'keyword'],
-            
-            // Identificadores
-            [/[a-zA-Z_][a-zA-Z0-9_]*/, 'identifier'],
-            
-            // Números
-            [/\d+\.\d+/, 'number.float'],
-            [/\d+/, 'number'],
-            
-            // Cadenas
-            [/"([^"\\]|\\.)*"/, 'string'],
-            [/'([^'\\]|\\.)*'/, 'string'],
-            
-            // Comentarios
-            [/\/\/.*$/, 'comment'],
-            [/\/\*/, 'comment', '@comment'],
-            
-            // Operadores
-            [/[+\-*\/%]/, 'operator'],
-            [/[=!<>]=?/, 'operator'],
-            [/[(){}[\]]/, 'bracket'],
-            [/[,;:]/, 'delimiter'],
-          ],
-          comment: [
-            [/[^/*]+/, 'comment'],
-            [/\*\//, 'comment', '@pop'],
-            [/[/*]/, 'comment']
-          ]
-        }
-      });
+  const funcionesBuiltIn = [
+    'imprimir', 'leer', 'longitud', 'tipo', 'convertir', 'redondear',
+    'absoluto', 'maximo', 'minimo', 'aleatorio'
+  ];
 
-      // Configurar autocompletado
-      monaco.languages.registerCompletionItemProvider('lynx', {
-        provideCompletionItems: (model, position) => {
-          const suggestions = [
-            // Palabras clave
-            {
-              label: 'val',
-              kind: monaco.languages.CompletionItemKind.Keyword,
-              insertText: 'val ${1:nombre} = ${2:valor}',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Declaración de variable'
-            },
-            {
-              label: 'si',
-              kind: monaco.languages.CompletionItemKind.Keyword,
-              insertText: 'si (${1:condicion}) {\n\t${2:// código}\n}',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Estructura condicional'
-            },
-            {
-              label: 'mientras',
-              kind: monaco.languages.CompletionItemKind.Keyword,
-              insertText: 'mientras (${1:condicion}) {\n\t${2:// código}\n}',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Bucle mientras'
-            },
-            {
-              label: 'para',
-              kind: monaco.languages.CompletionItemKind.Keyword,
-              insertText: 'para (val ${1:i} = ${2:0}; ${3:i < 10}; ${4:i = i + 1}) {\n\t${5:// código}\n}',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Bucle para'
-            },
-            {
-              label: 'fun',
-              kind: monaco.languages.CompletionItemKind.Function,
-              insertText: 'fun ${1:nombre}(${2:parametros}) {\n\t${3:// código}\n\tretornar ${4:valor}\n}',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Declaración de función'
-            },
-            {
-              label: 'imprimir',
-              kind: monaco.languages.CompletionItemKind.Function,
-              insertText: 'imprimir(${1:mensaje})',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Función para imprimir en consola'
-            }
-          ];
-
-          return { suggestions };
-        }
-      });
-
-      // Configurar tema personalizado
-      monaco.editor.defineTheme('lynx-theme', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [
-          { token: 'keyword', foreground: '#569CD6', fontStyle: 'bold' },
-          { token: 'string', foreground: '#CE9178' },
-          { token: 'number', foreground: '#B5CEA8' },
-          { token: 'number.float', foreground: '#B5CEA8' },
-          { token: 'comment', foreground: '#6A9955', fontStyle: 'italic' },
-          { token: 'identifier', foreground: '#9CDCFE' },
-          { token: 'operator', foreground: '#D4D4D4' },
-          { token: 'bracket', foreground: '#FFD700' },
-        ],
-        colors: {
-          'editor.background': '#1E1E1E',
-          'editor.foreground': '#D4D4D4',
-          'editorLineNumber.foreground': '#858585',
-          'editorCursor.foreground': '#AEAFAD',
-        }
-      });
-    };
-
-    // La configuración se aplicará cuando Monaco esté disponible
-    if (monacoRef.current) {
-      configurarLynx(monacoRef.current);
+  const verificarConexion = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:8000/health');
+      if (response.ok) {
+        setEstadoConexion('conectado');
+      } else {
+        setEstadoConexion('error');
+      }
+    } catch (error) {
+      setEstadoConexion('desconectado');
     }
   }, []);
 
-  // Validación en tiempo real
   useEffect(() => {
-    if (validacionTiempoReal && codigo.trim()) {
-      const timer = setTimeout(() => {
-        validarCodigo();
-      }, 1000); // Validar después de 1 segundo de inactividad
+    verificarConexion();
+    const interval = setInterval(verificarConexion, 30000);
+    return () => clearInterval(interval);
+  }, [verificarConexion]);
 
-      return () => clearTimeout(timer);
+  const extraerSimbolos = useCallback((codigoTexto) => {
+    const variables = new Set();
+    const funciones = new Set();
+
+    const regexVar = /val\s+([a-zA-Z_][a-zA-Z0-9_]*)/g;
+    let match;
+    while ((match = regexVar.exec(codigoTexto)) !== null) {
+      variables.add(match[1]);
     }
-  }, [codigo, validacionTiempoReal]);
 
-  const validarCodigo = async () => {
-    if (!codigo.trim()) return;
+    const regexFun = /fun\s+([a-zA-Z_][a-zA-Z0-9_]*)/g;
+    while ((match = regexFun.exec(codigoTexto)) !== null) {
+      funciones.add(match[1]);
+    }
+
+    setVariablesDeclaradas(variables);
+    setFuncionesDeclaradas(funciones);
+  }, []);
+
+  const configurarLynxAvanzado = useCallback((monaco) => {
+    if (!monaco.languages.getLanguages().find(lang => lang.id === 'lynx')) {
+      monaco.languages.register({ id: 'lynx' });
+    }
+
+    monaco.languages.setMonarchTokensProvider('lynx', {
+      defaultToken: 'invalid',
+      keywords: palabrasReservadas,
+      builtins: funcionesBuiltIn,
+
+      tokenizer: {
+        root: [
+          [/\/\/.*$/, 'comment'],
+          [/\/\*/, 'comment', '@comment'],
+
+          [/\b(?:val|si|sino|sinosi|mientras|para|fun|retornar|imprimir|verdadero|falso|nulo|y|o|no|hacer|salir|en|repetir|hasta|intentar|capturar|segun|caso|predeterminado|finalmente|parar)\b/, 'keyword'],
+
+          [/\b(?:imprimir|leer|longitud|tipo|convertir|redondear|absoluto|maximo|minimo|aleatorio)\b/, 'predefined'],
+
+          [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
+          [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+          [/\d+/, 'number'],
+
+          [/"([^"\\]|\\.)*$/, 'string.invalid'],
+          [/"/, 'string', '@string'],
+          [/'([^'\\]|\\.)*$/, 'string.invalid'],
+          [/'/, 'string', '@string_single'],
+
+          [/[a-zA-Z_][a-zA-Z0-9_]*/, {
+            cases: {
+              '@keywords': 'keyword',
+              '@builtins': 'predefined',
+              '@default': 'identifier'
+            }
+          }],
+
+          // Operadores
+          [/[+\-*\/%]/, 'operator.arithmetic'],
+          [/[=!<>]=?/, 'operator.comparison'],
+          [/[&|^~]/, 'operator.bitwise'],
+          [/[(){}[\]]/, 'delimiter.bracket'],
+          [/[,;:.]/, 'delimiter'],
+          [/=/, 'operator.assignment'],
+
+          // Espacios en blanco
+          [/[ \t\r\n]+/, 'white'],
+        ],
+
+        comment: [
+          [/[^\/*]+/, 'comment'],
+          [/\*\//, 'comment', '@pop'],
+          [/[\/*]/, 'comment']
+        ],
+
+        string: [
+          [/[^\\"]+/, 'string'],
+          [/\\./, 'string.escape'],
+          [/"/, 'string', '@pop']
+        ],
+
+        string_single: [
+          [/[^\\']+/, 'string'],
+          [/\\./, 'string.escape'],
+          [/'/, 'string', '@pop']
+        ]
+      }
+    });
+
+    monaco.languages.registerCompletionItemProvider('lynx', {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
+        const suggestions = [];
+
+        palabrasReservadas.forEach(keyword => {
+          suggestions.push({
+            label: keyword,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: keyword,
+            range: range,
+            documentation: `Palabra reservada: ${keyword}`,
+            detail: 'Palabra clave de Lynx'
+          });
+        });
+
+        // Snippets de estructuras
+        suggestions.push(
+          {
+            label: 'si-completo',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: 'si (${1:condicion}) {\n\t${2:// código}\n} sino {\n\t${3:// código alternativo}\n}',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: 'Estructura condicional completa con si-sino',
+            detail: 'Estructura de control'
+          },
+          {
+            label: 'mientras',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: 'mientras (${1:condicion}) {\n\t${2:// código}\n}',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: 'Bucle mientras',
+            detail: 'Estructura de control'
+          },
+          {
+            label: 'para',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: 'para (val ${1:i} = ${2:0}; ${3:i < 10}; ${4:i = i + 1}) {\n\t${5:// código}\n}',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: 'Bucle para con inicialización, condición e incremento',
+            detail: 'Estructura de control'
+          },
+          {
+            label: 'fun',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: 'fun ${1:nombre}(${2:parametros}) {\n\t${3:// código}\n\tretornar ${4:valor}\n}',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: 'Declaración de función con parámetros y retorno',
+            detail: 'Función'
+          }
+        );
+
+        // Variables declaradas
+        variablesDeclaradas.forEach(variable => {
+          suggestions.push({
+            label: variable,
+            kind: monaco.languages.CompletionItemKind.Variable,
+            insertText: variable,
+            range: range,
+            documentation: `Variable declarada: ${variable}`,
+            detail: 'Variable local'
+          });
+        });
+
+        // Funciones declaradas
+        funcionesDeclaradas.forEach(funcion => {
+          suggestions.push({
+            label: funcion,
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: `${funcion}($1)`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: `Función definida: ${funcion}`,
+            detail: 'Función personalizada'
+          });
+        });
+
+        // Funciones built-in
+        funcionesBuiltIn.forEach(funcion => {
+          let insertText = `${funcion}($1)`;
+          let documentation = `Función integrada: ${funcion}`;
+
+          // Documentación específica para funciones conocidas
+          switch (funcion) {
+            case 'imprimir':
+              documentation = 'Imprime valores en la consola';
+              insertText = 'imprimir(${1:valor})';
+              break;
+            case 'longitud':
+              documentation = 'Obtiene la longitud de un arreglo o cadena';
+              insertText = 'longitud(${1:variable})';
+              break;
+            case 'tipo':
+              documentation = 'Obtiene el tipo de una variable';
+              insertText = 'tipo(${1:variable})';
+              break;
+          }
+
+          suggestions.push({
+            label: funcion,
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: insertText,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: range,
+            documentation: documentation,
+            detail: 'Función integrada'
+          });
+        });
+
+        return { suggestions };
+      }
+    });
+
+    // Proveedor de información de hover
+    monaco.languages.registerHoverProvider('lynx', {
+      provideHover: (model, position) => {
+        const word = model.getWordAtPosition(position);
+        if (!word) return null;
+
+        const wordValue = word.word;
+        let contents = [];
+
+        if (palabrasReservadas.includes(wordValue)) {
+          contents.push({ value: `**${wordValue}** - Palabra reservada de Lynx` });
+        } else if (funcionesBuiltIn.includes(wordValue)) {
+          contents.push({ value: `**${wordValue}()** - Función integrada` });
+        } else if (variablesDeclaradas.has(wordValue)) {
+          contents.push({ value: `**${wordValue}** - Variable declarada` });
+        } else if (funcionesDeclaradas.has(wordValue)) {
+          contents.push({ value: `**${wordValue}()** - Función definida por el usuario` });
+        }
+
+        return contents.length > 0 ? { contents } : null;
+      }
+    });
+
+    // Tema personalizado mejorado
+    monaco.editor.defineTheme('lynx-theme-advanced', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'keyword', foreground: '#569CD6', fontStyle: 'bold' },
+        { token: 'predefined', foreground: '#DCDCAA', fontStyle: 'bold' },
+        { token: 'string', foreground: '#CE9178' },
+        { token: 'string.escape', foreground: '#D7BA7D' },
+        { token: 'string.invalid', foreground: '#FF6B6B', fontStyle: 'italic' },
+        { token: 'number', foreground: '#B5CEA8' },
+        { token: 'number.float', foreground: '#B5CEA8' },
+        { token: 'number.hex', foreground: '#B5CEA8' },
+        { token: 'comment', foreground: '#6A9955', fontStyle: 'italic' },
+        { token: 'identifier', foreground: '#9CDCFE' },
+        { token: 'operator.arithmetic', foreground: '#D4D4D4' },
+        { token: 'operator.comparison', foreground: '#D4D4D4' },
+        { token: 'operator.assignment', foreground: '#D4D4D4' },
+        { token: 'operator.bitwise', foreground: '#D4D4D4' },
+        { token: 'delimiter.bracket', foreground: '#FFD700' },
+        { token: 'delimiter', foreground: '#D4D4D4' },
+        { token: 'invalid', foreground: '#FF6B6B', fontStyle: 'italic' },
+      ],
+      colors: {
+        'editor.background': '#1E1E1E',
+        'editor.foreground': '#D4D4D4',
+        'editorLineNumber.foreground': '#858585',
+        'editorCursor.foreground': '#AEAFAD',
+        'editor.selectionBackground': '#264F78',
+        'editor.inactiveSelectionBackground': '#3A3D41',
+        'editorIndentGuide.background': '#404040',
+        'editorIndentGuide.activeBackground': '#707070',
+        'editor.wordHighlightBackground': '#575757B8',
+        'editor.wordHighlightStrongBackground': '#004972B8',
+      }
+    });
+  }, [variablesDeclaradas, funcionesDeclaradas]);
+
+  // Validación en tiempo real mejorada
+  const validarCodigoTiempoReal = useCallback(async (codigoTexto) => {
+    if (!codigoTexto.trim() || estadoConexion !== 'conectado') return;
 
     try {
       const response = await fetch('http://localhost:8000/analizar-lexico', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo }),
+        body: JSON.stringify({ codigo: codigoTexto }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        
-        // Marcar errores en el editor
+
+        // Extraer símbolos del código
+        extraerSimbolos(codigoTexto);
+
+        // Marcar errores y warnings en el editor
         if (editorRef.current && monacoRef.current) {
-          const markers = data.errores.map((error, index) => ({
-            severity: monacoRef.current.MarkerSeverity.Error,
-            startLineNumber: 1,
-            startColumn: 1,
-            endLineNumber: 1,
-            endColumn: 100,
-            message: error,
-            source: 'lynx'
-          }));
+          const markers = [];
+
+          // Errores léxicos
+          data.errores.forEach((error, index) => {
+            markers.push({
+              severity: monacoRef.current.MarkerSeverity.Error,
+              startLineNumber: 1,
+              startColumn: 1,
+              endLineNumber: 1,
+              endColumn: 100,
+              message: error,
+              source: 'lynx-lexer'
+            });
+          });
+
+          // Análisis adicional para warnings
+          const lineas = codigoTexto.split('\n');
+          const warningsEncontrados = [];
+
+          lineas.forEach((linea, indiceLinea) => {
+            // Warning: variables no utilizadas (simplificado)
+            const declaracionVar = linea.match(/val\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+            if (declaracionVar) {
+              const nombreVar = declaracionVar[1];
+              const usoVar = new RegExp(`\\b${nombreVar}\\b`, 'g');
+              const usosEnCodigo = (codigoTexto.match(usoVar) || []).length;
+
+              if (usosEnCodigo <= 1) { // Solo la declaración
+                warningsEncontrados.push(`Variable '${nombreVar}' declarada pero no utilizada`);
+                markers.push({
+                  severity: monacoRef.current.MarkerSeverity.Warning,
+                  startLineNumber: indiceLinea + 1,
+                  startColumn: 1,
+                  endLineNumber: indiceLinea + 1,
+                  endColumn: linea.length + 1,
+                  message: `Variable '${nombreVar}' declarada pero no utilizada`,
+                  source: 'lynx-analyzer'
+                });
+              }
+            }
+          });
+
+          setWarnings(warningsEncontrados);
 
           monacoRef.current.editor.setModelMarkers(
             editorRef.current.getModel(),
@@ -212,9 +426,28 @@ fun saludar(nombre) {
         }
       }
     } catch (error) {
-      console.error('Error en validación:', error);
+      console.error('Error en validación tiempo real:', error);
     }
-  };
+  }, [estadoConexion, extraerSimbolos]);
+
+  // Efecto para validación en tiempo real con debounce
+  useEffect(() => {
+    if (validacionTiempoReal && codigo.trim()) {
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
+
+      validationTimeoutRef.current = setTimeout(() => {
+        validarCodigoTiempoReal(codigo);
+      }, 800);
+    }
+
+    return () => {
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
+    };
+  }, [codigo, validacionTiempoReal, validarCodigoTiempoReal]);
 
   const analizar = async (tipo = 'completo') => {
     if (!codigo.trim()) {
@@ -222,8 +455,13 @@ fun saludar(nombre) {
       return;
     }
 
+    if (estadoConexion !== 'conectado') {
+      alert('No hay conexión con el servidor backend');
+      return;
+    }
+
     setCargando(true);
-    
+
     let url = 'http://localhost:8000/analizar';
     if (tipo === 'lexico') {
       url = 'http://localhost:8000/analizar-lexico';
@@ -243,7 +481,7 @@ fun saludar(nombre) {
       }
 
       const data = await response.json();
-      
+
       setTokens(data.tokens || []);
       setErrores(data.errores || []);
       setAst(data.ast || null);
@@ -257,12 +495,52 @@ fun saludar(nombre) {
     }
   };
 
+  const ejecutar = async () => {
+    if (!codigo.trim()) {
+      alert('Por favor, ingresa código para ejecutar');
+      return;
+    }
+
+    if (estadoConexion !== 'conectado') {
+      alert('No hay conexión con el servidor backend');
+      return;
+    }
+
+    setCargando(true);
+    setResultado('');
+
+    try {
+      const response = await fetch('http://localhost:8000/ejecutar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setResultado(data.resultado || data.error || 'Ejecución completada');
+
+    } catch (error) {
+      console.error('Error:', error);
+      setResultado(`Error de ejecución: ${error.message}`);
+    } finally {
+      setCargando(false);
+    }
+  };
+
   const limpiar = () => {
     setCodigo('');
     setTokens([]);
     setErrores([]);
+    setWarnings([]);
     setAst(null);
-    
+    setResultado('');
+    setVariablesDeclaradas(new Set());
+    setFuncionesDeclaradas(new Set());
+
     // Limpiar marcadores del editor
     if (editorRef.current && monacoRef.current) {
       monacoRef.current.editor.setModelMarkers(
@@ -273,22 +551,48 @@ fun saludar(nombre) {
     }
   };
 
+  const copiarCodigo = () => {
+    navigator.clipboard.writeText(codigo);
+    alert('Código copiado al portapapeles');
+  };
+
+  const descargarCodigo = () => {
+    const blob = new Blob([codigo], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'codigo-lynx.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const cargarArchivo = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setCodigo(e.target.result);
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const renderASTDiagram = (node, nivel = 0) => {
     if (!node) return null;
-    
+
     const indent = nivel * 20;
     const nodeId = `node-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // Valor primitivo
     if (node.tipo_primitivo && node.valor !== undefined) {
       const colorClass = {
         'str': 'bg-green-100 border-green-300 text-green-800',
-        'int': 'bg-blue-100 border-blue-300 text-blue-800', 
+        'int': 'bg-blue-100 border-blue-300 text-blue-800',
         'float': 'bg-blue-100 border-blue-300 text-blue-800',
         'bool': 'bg-purple-100 border-purple-300 text-purple-800',
         'string': 'bg-gray-100 border-gray-300 text-gray-800'
       }[node.tipo_primitivo] || 'bg-gray-100 border-gray-300 text-gray-800';
-      
+
       return (
         <div key={nodeId} className="flex items-center my-1" style={{ marginLeft: indent }}>
           <div className={`px-2 py-1 rounded border text-xs ${colorClass}`}>
@@ -298,7 +602,7 @@ fun saludar(nombre) {
         </div>
       );
     }
-    
+
     // Lista
     if (node.tipo === 'lista' && node.elementos) {
       return (
@@ -320,7 +624,7 @@ fun saludar(nombre) {
         </div>
       );
     }
-    
+
     // Nodo AST
     if (typeof node === 'object' && node !== null && node.tipo) {
       const colors = {
@@ -331,9 +635,9 @@ fun saludar(nombre) {
         'ExpresionBinaria': 'bg-yellow-500',
         'Imprimir': 'bg-pink-500'
       };
-      
+
       const bgColor = colors[node.tipo] || 'bg-gray-500';
-      
+
       return (
         <div key={nodeId} className="my-2" style={{ marginLeft: indent }}>
           <div className="flex items-center">
@@ -356,7 +660,7 @@ fun saludar(nombre) {
         </div>
       );
     }
-    
+
     return (
       <div key={nodeId} className="inline-block px-2 py-1 bg-gray-100 rounded text-xs text-gray-600">
         {String(node)}
@@ -367,54 +671,38 @@ fun saludar(nombre) {
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-    
-    // Aplicar configuración del lenguaje
-    monaco.languages.register({ id: 'lynx' });
-    
-    // Configurar tokens y sintaxis (repetir aquí para asegurar que se aplique)
-    monaco.languages.setMonarchTokensProvider('lynx', {
-      tokenizer: {
-        root: [
-          [/\b(val|si|sino|sinosi|mientras|para|fun|retornar|imprimir|verdadero|falso|nulo|y|o|no|hacer|salir|en|repetir|hasta|intentar|capturar|segun|caso|predeterminado|finalmente|parar)\b/, 'keyword'],
-          [/[a-zA-Z_][a-zA-Z0-9_]*/, 'identifier'],
-          [/\d+\.\d+/, 'number.float'],
-          [/\d+/, 'number'],
-          [/"([^"\\]|\\.)*"/, 'string'],
-          [/'([^'\\]|\\.)*'/, 'string'],
-          [/\/\/.*$/, 'comment'],
-          [/\/\*/, 'comment', '@comment'],
-          [/[+\-*\/%]/, 'operator'],
-          [/[=!<>]=?/, 'operator'],
-          [/[(){}[\]]/, 'bracket'],
-          [/[,;:]/, 'delimiter'],
-        ],
-        comment: [
-          [/[^/*]+/, 'comment'],
-          [/\*\//, 'comment', '@pop'],
-          [/[/*]/, 'comment']
-        ]
-      }
-    });
 
-    // Aplicar tema
-    monaco.editor.defineTheme('lynx-theme', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'keyword', foreground: '#569CD6', fontStyle: 'bold' },
-        { token: 'string', foreground: '#CE9178' },
-        { token: 'number', foreground: '#B5CEA8' },
-        { token: 'number.float', foreground: '#B5CEA8' },
-        { token: 'comment', foreground: '#6A9955', fontStyle: 'italic' },
-        { token: 'identifier', foreground: '#9CDCFE' },
-        { token: 'operator', foreground: '#D4D4D4' },
-        { token: 'bracket', foreground: '#FFD700' },
-      ],
-      colors: {
-        'editor.background': '#1E1E1E',
-        'editor.foreground': '#D4D4D4',
-      }
-    });
+    // Configurar lenguaje avanzado
+    configurarLynxAvanzado(monaco);
+
+    // Extraer símbolos iniciales
+    extraerSimbolos(codigo);
+  };
+
+  const getEstadoConexionStyle = () => {
+    switch (estadoConexion) {
+      case 'conectado':
+        return 'bg-green-100 text-green-800 border-green-300';
+      case 'desconectado':
+        return 'bg-red-100 text-red-800 border-red-300';
+      case 'error':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-300';
+    }
+  };
+
+  const getEstadoConexionTexto = () => {
+    switch (estadoConexion) {
+      case 'conectado':
+        return 'Conectado al servidor';
+      case 'desconectado':
+        return 'Sin conexión al servidor';
+      case 'error':
+        return 'Error de conexión';
+      default:
+        return 'Verificando conexión...';
+    }
   };
 
   return (
@@ -424,11 +712,17 @@ fun saludar(nombre) {
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
             <Code className="text-blue-600" />
-            Editor Lynx Avanzado
+            Editor Lynx
           </h1>
-          <p className="text-gray-600">
-            Editor con autocompletado, validación en tiempo real y visualización de AST
+          <p className="text-gray-600 mb-4">
+            Editor con análisis en tiempo real, autocompletado inteligente y validación sintáctica
           </p>
+
+          {/* Estado de conexión */}
+          <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border ${getEstadoConexionStyle()}`}>
+            <div className={`w-2 h-2 rounded-full ${estadoConexion === 'conectado' ? 'bg-green-500' : estadoConexion === 'desconectado' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+            {getEstadoConexionTexto()}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -439,7 +733,13 @@ fun saludar(nombre) {
                 <FileText size={20} />
                 Editor de Código
               </h2>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <Lightbulb size={16} className="text-yellow-500" />
+                  <span className="text-gray-600">
+                    Variables: {variablesDeclaradas.size} | Funciones: {funcionesDeclaradas.size}
+                  </span>
+                </div>
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -447,171 +747,281 @@ fun saludar(nombre) {
                     onChange={(e) => setValidacionTiempoReal(e.target.checked)}
                     className="rounded"
                   />
-                  Validación en tiempo real
+                  Análisis en tiempo real
                 </label>
                 <Settings size={16} className="text-gray-400" />
               </div>
             </div>
+
             <div className="p-4">
-              <div className="border rounded-lg overflow-hidden" style={{ height: '500px' }}>
+              {/* Toolbar del editor */}
+              <div className="flex gap-2 mb-4 flex-wrap">
+                <button
+                  onClick={copiarCodigo}
+                  className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm transition-colors"
+                >
+                  <Copy size={16} />
+                  Copiar
+                </button>
+                <button
+                  onClick={descargarCodigo}
+                  className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm transition-colors"
+                >
+                  <Download size={16} />
+                  Descargar
+                </button>
+                <label className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm cursor-pointer transition-colors">
+                  <Upload size={16} />
+                  Cargar
+                  <input
+                    type="file"
+                    accept=".txt,.lynx"
+                    onChange={cargarArchivo}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  onClick={limpiar}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm transition-colors"
+                >
+                  <RotateCcw size={16} />
+                  Limpiar
+                </button>
+              </div>
+
+              {/* Editor Monaco */}
+              <div className="border rounded-lg overflow-hidden">
                 <Editor
-                  height="100%"
+                  height="500px"
                   language="lynx"
-                  theme="lynx-theme"
+                  theme="lynx-theme-advanced"
                   value={codigo}
-                  onChange={(value) => setCodigo(value || '')}
+                  onChange={setCodigo}
                   onMount={handleEditorDidMount}
                   options={{
-                    minimap: { enabled: false },
+                    minimap: { enabled: true },
                     fontSize: 14,
-                    lineNumbers: 'on',
-                    roundedSelection: false,
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-                    tabSize: 2,
-                    insertSpaces: true,
                     wordWrap: 'on',
-                    suggest: {
-                      showKeywords: true,
-                      showSnippets: true,
+                    automaticLayout: true,
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: true,
+                    parameterHints: { enabled: true },
+                    hover: { enabled: true },
+                    folding: true,
+                    lineNumbers: 'on',
+                    renderLineHighlight: 'all',
+                    scrollBeyondLastLine: false,
+                    smoothScrolling: true,
+                    cursorBlinking: 'smooth',
+                    renderWhitespace: 'selection',
+                    bracketPairColorization: { enabled: true },
+                    guides: {
+                      bracketPairs: true,
+                      indentation: true
                     }
                   }}
                 />
               </div>
-              
-              <div className="flex flex-wrap gap-2 mt-4">
-                <button
-                  onClick={() => analizar('completo')}
-                  disabled={cargando}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-                >
-                  <Play size={16} />
-                  {cargando ? 'Analizando...' : 'Análisis Completo'}
-                </button>
-                
+
+              {/* Botones de acción */}
+              <div className="flex gap-3 mt-4">
                 <button
                   onClick={() => analizar('lexico')}
                   disabled={cargando}
-                  className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg transition-colors"
                 >
                   <Zap size={16} />
-                  Solo Léxico
+                  {cargando ? 'Analizando...' : 'Análisis Léxico'}
                 </button>
-                
                 <button
                   onClick={() => analizar('sintactico')}
                   disabled={cargando}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white rounded-lg transition-colors"
+                >
+                  <TreePine size={16} />
+                  {cargando ? 'Analizando...' : 'Análisis Sintáctico'}
+                </button>
+                <button
+                  onClick={() => analizar('completo')}
+                  disabled={cargando}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg transition-colors"
                 >
                   <Code size={16} />
-                  Solo Sintáctico
+                  {cargando ? 'Analizando...' : 'Análisis Completo'}
                 </button>
-                
-                <button
-                  onClick={limpiar}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Limpiar
-                </button>
+                {/* <button */}
+                {/*   onClick={ejecutar} */}
+                {/*   disabled={cargando} */}
+                {/*   className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white rounded-lg transition-colors" */}
+                {/* > */}
+                {/*   <Play size={16} /> */}
+                {/*   {cargando ? 'Ejecutando...' : 'Ejecutar'} */}
+                {/* </button> */}
               </div>
             </div>
           </div>
 
-          {/* Resultados */}
+          {/* Panel de resultados */}
           <div className="space-y-6">
-            {/* Estado */}
-            {(tokens.length > 0 || errores.length > 0) && (
-              <div className="bg-white rounded-lg shadow-sm p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  {errores.length === 0 ? (
-                    <>
-                      <CheckCircle className="text-green-500" size={20} />
-                      <span className="text-green-700 font-semibold">Análisis Exitoso</span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="text-red-500" size={20} />
-                      <span className="text-red-700 font-semibold">Errores Encontrados</span>
-                    </>
-                  )}
+            {/* Errores y Warnings */}
+            {(errores.length > 0 || warnings.length > 0) && (
+              <div className="bg-white rounded-lg shadow-sm">
+                <div className="p-4 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <AlertCircle className="text-red-500" size={20} />
+                    Diagnósticos
+                  </h3>
                 </div>
-                <p className="text-sm text-gray-600">
-                  {tokens.length} tokens encontrados, {errores.length} errores
-                </p>
+                <div className="p-4 space-y-3">
+                  {errores.map((error, index) => (
+                    <div key={index} className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle className="text-red-500 mt-0.5" size={16} />
+                      <div>
+                        <div className="font-medium text-red-800">Error</div>
+                        <div className="text-sm text-red-600">{error}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {warnings.map((warning, index) => (
+                    <div key={index} className="flex items-start gap-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <AlertCircle className="text-yellow-500 mt-0.5" size={16} />
+                      <div>
+                        <div className="font-medium text-yellow-800">Advertencia</div>
+                        <div className="text-sm text-yellow-600">{warning}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            {/* Errores */}
-            {errores.length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm">
-                <div className="p-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-red-700 flex items-center gap-2">
-                    <AlertCircle size={18} />
-                    Errores ({errores.length})
-                  </h3>
-                </div>
-                <div className="p-4">
-                  <div className="space-y-2">
-                    {errores.map((error, index) => (
-                      <div key={index} className="bg-red-50 border border-red-200 rounded-lg p-3">
-                        <p className="text-red-800 text-sm font-mono">{error}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Resultado de ejecución */}
+            {/* {resultado && ( */}
+            {/*   <div className="bg-white rounded-lg shadow-sm"> */}
+            {/*     <div className="p-4 border-b border-gray-200"> */}
+            {/*       <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2"> */}
+            {/*         <Play className="text-green-500" size={20} /> */}
+            {/*         Resultado de Ejecución */}
+            {/*       </h3> */}
+            {/*     </div> */}
+            {/*     <div className="p-4"> */}
+            {/*       <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap"> */}
+            {/*         {resultado} */}
+            {/*       </pre> */}
+            {/*     </div> */}
+            {/*   </div> */}
+            {/* )} */}
 
             {/* Tokens */}
             {tokens.length > 0 && (
               <div className="bg-white rounded-lg shadow-sm">
                 <div className="p-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Tokens ({tokens.length})
-                  </h3>
-                </div>
-                <div className="overflow-auto max-h-64">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-3 font-semibold">Lexema</th>
-                        <th className="text-left p-3 font-semibold">Tipo</th>
-                        <th className="text-left p-3 font-semibold">Línea</th>
-                        <th className="text-left p-3 font-semibold">Columna</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tokens.map((token, index) => (
-                        <tr key={index} className="border-t border-gray-200 hover:bg-gray-50">
-                          <td className="p-3 font-mono text-blue-600">{token.lexema}</td>
-                          <td className="p-3 text-green-600">{token.tipo}</td>
-                          <td className="p-3">{token.linea}</td>
-                          <td className="p-3">{token.columna}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* AST Diagram */}
-            {ast && (
-              <div className="bg-white rounded-lg shadow-sm">
-                <div className="p-4 border-b border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                    <TreePine size={18} />
-                    Árbol de Sintaxis Abstracta (AST)
+                    <Zap className="text-blue-500" size={20} />
+                    Tokens Identificados ({tokens.length})
                   </h3>
                 </div>
-                <div className="p-4 overflow-auto max-h-96">
-                  <div className="text-sm">
-                    {renderASTDiagram(ast)}
+                <div className="p-4">
+                  <div className="max-h-60 overflow-y-auto">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {tokens.map((token, index) => {
+                        const colorMap = {
+                          'PALABRA_RESERVADA': 'bg-blue-100 text-blue-800 border-blue-300',
+                          'ID': 'bg-green-100 text-green-800 border-green-300',
+                          'NUMERO': 'bg-purple-100 text-purple-800 border-purple-300',
+                          'CADENA': 'bg-orange-100 text-orange-800 border-orange-300',
+                          'OPERADOR': 'bg-red-100 text-red-800 border-red-300',
+                          'ASIGNACION': 'bg-red-100 text-red-800 border-red-300',
+                          'DELIMITADOR': 'bg-gray-100 text-gray-800 border-gray-300'
+                        };
+
+                        const colorClass = colorMap[token.tipo] || 'bg-gray-100 text-gray-800 border-gray-300';
+
+                        return (
+                          <div key={index} className={`px-3 py-2 rounded-lg border text-sm ${colorClass}`}>
+                            <div className="font-medium">Lexema: {token.lexema || token.valor}</div>
+                            <div className="text-xs opacity-75">Tipo: {token.tipo}</div>
+                            <div className="text-xs opacity-75">Línea: {token.linea}</div>
+                            <div className="text-xs opacity-75">Columna: {token.columna}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
             )}
+            {/* AST */}
+            {ast && (
+              <div className="bg-white rounded-lg shadow-sm">
+                <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <TreePine className="text-green-500" size={20} />
+                    Árbol Sintáctico Abstracto
+                  </h3>
+                  <button
+                    onClick={() => setMostrarAST(!mostrarAST)}
+                    className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  >
+                    {mostrarAST ? 'Ocultar' : 'Mostrar'} AST
+                  </button>
+                </div>
+                {mostrarAST && (
+                  <div className="p-4">
+                    <div className="max-h-96 overflow-y-auto bg-gray-50 p-4 rounded-lg">
+                      {renderASTDiagram(ast)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Información de estado */}
+            <div className="bg-white rounded-lg shadow-sm">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <CheckCircle className="text-green-500" size={20} />
+                  Estado del Análisis
+                </h3>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Variables declaradas:</span>
+                  <span className="font-medium">{variablesDeclaradas.size}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Funciones declaradas:</span>
+                  <span className="font-medium">{funcionesDeclaradas.size}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Líneas de código:</span>
+                  <span className="font-medium">{codigo.split('\n').length}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Caracteres:</span>
+                  <span className="font-medium">{codigo.length}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Errores encontrados:</span>
+                  <span className={`font-medium ${errores.length > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {errores.length}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Advertencias:</span>
+                  <span className={`font-medium ${warnings.length > 0 ? 'text-yellow-600' : 'text-green-600'}`}>
+                    {warnings.length}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 text-center text-gray-500 text-sm">
+          <p>Editor Lynx v2.0 - Desarrollado con React y Monaco Editor</p>
+          <p>Soporte para análisis léxico, sintáctico y ejecución de código</p>
         </div>
       </div>
     </div>

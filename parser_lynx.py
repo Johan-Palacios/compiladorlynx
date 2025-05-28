@@ -14,100 +14,118 @@ precedence = (
 )
 
 # AST Node classes
+# Reglas de gramátic# AST Node classes
 class ASTNode:
-    pass
+    def __init__(self, linea=None):
+        self.linea = linea
 
 class Programa(ASTNode):
-    def __init__(self, instrucciones):
+    def __init__(self, instrucciones, linea=None):
+        super().__init__(linea)
         self.instrucciones = instrucciones
 
 class DeclaracionVariable(ASTNode):
-    def __init__(self, nombre, valor=None):
+    def __init__(self, nombre, valor=None, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.valor = valor
 
 class AsignacionVariable(ASTNode):
-    def __init__(self, nombre, valor):
+    def __init__(self, nombre, valor, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.valor = valor
 
 class DeclaracionArreglo(ASTNode):
-    def __init__(self, nombre, elementos):
+    def __init__(self, nombre, elementos, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.elementos = elementos
 
 class DeclaracionTabla(ASTNode):
-    def __init__(self, nombre, pares):
+    def __init__(self, nombre, pares, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.pares = pares
 
 class EstructuraSi(ASTNode):
-    def __init__(self, condicion, bloque, sinosis=None):
+    def __init__(self, condicion, bloque, sinosis=None, linea=None):
+        super().__init__(linea)
         self.condicion = condicion
         self.bloque = bloque
         self.sinosis = sinosis
 
 class EstructuraMientras(ASTNode):
-    def __init__(self, condicion, bloque):
+    def __init__(self, condicion, bloque, linea=None):
+        super().__init__(linea)
         self.condicion = condicion
         self.bloque = bloque
 
 class EstructuraPara(ASTNode):
-    def __init__(self, init, condicion, incremento, bloque):
+    def __init__(self, init, condicion, incremento, bloque, linea=None):
+        super().__init__(linea)
         self.init = init
         self.condicion = condicion
         self.incremento = incremento
         self.bloque = bloque
 
 class EstructuraRepetir(ASTNode):
-    def __init__(self, bloque, condicion):
+    def __init__(self, bloque, condicion, linea=None):
+        super().__init__(linea)
         self.bloque = bloque
         self.condicion = condicion
 
 class EstructuraSegun(ASTNode):
-    def __init__(self, expresion, casos, predeterminado=None):
+    def __init__(self, expresion, casos, predeterminado=None, linea=None):
+        super().__init__(linea)
         self.expresion = expresion
         self.casos = casos
         self.predeterminado = predeterminado
 
 class Caso(ASTNode):
-    def __init__(self, valor, bloque):
+    def __init__(self, valor, bloque, linea=None):
+        super().__init__(linea)
         self.valor = valor
         self.bloque = bloque
 
 class DeclaracionFuncion(ASTNode):
-    def __init__(self, nombre, parametros, bloque, retorno=None):
+    def __init__(self, nombre, parametros, bloque, retorno=None, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.parametros = parametros
         self.bloque = bloque
         self.retorno = retorno
 
 class Imprimir(ASTNode):
-    def __init__(self, elementos):
+    def __init__(self, elementos, linea=None):
+        super().__init__(linea)
         self.elementos = elementos
 
 class ExpresionBinaria(ASTNode):
-    def __init__(self, izq, op, der):
+    def __init__(self, izq, op, der, linea=None):
+        super().__init__(linea)
         self.izq = izq
         self.op = op
         self.der = der
 
 class ExpresionUnaria(ASTNode):
-    def __init__(self, op, expr):
+    def __init__(self, op, expr, linea=None):
+        super().__init__(linea)
         self.op = op
         self.expr = expr
 
 class AccesoArreglo(ASTNode):
-    def __init__(self, nombre, indice):
+    def __init__(self, nombre, indice, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.indice = indice
 
 class AccesoTabla(ASTNode):
-    def __init__(self, nombre, clave):
+    def __init__(self, nombre, clave, linea=None):
+        super().__init__(linea)
         self.nombre = nombre
         self.clave = clave
 
-# Reglas de gramática
 def p_bloque_codigo(p):
     '''bloque_codigo : instruccion_list
                     | empty'''
@@ -162,13 +180,14 @@ def p_declaracion_simple(p):
 
 def p_asignacion_variable(p):
     '''asignacion_variable : ID ASIGNACION valor'''
-    p[0] = AsignacionVariable(p[1], p[3])
+    p[0] = AsignacionVariable(p[1], p[3], linea=p.lineno(1))
+
 
 def p_declaracion_variable(p):
     '''declaracion_variable : VAL ID ASIGNACION valor
                            | declaracion_simple'''
     if len(p) == 5:
-        p[0] = DeclaracionVariable(p[2], p[4])
+        p[0] = DeclaracionVariable(p[2], p[4], linea=p.lineno(1))
     else:
         p[0] = p[1]
 
@@ -246,7 +265,7 @@ def p_expresion_aritmetica(p):
     if len(p) == 2:
         p[0] = p[1]
     else:
-        p[0] = ExpresionBinaria(p[1], p[2], p[3])
+        p[0] = ExpresionBinaria(p[1], p[2], p[3], linea=p.lineno(2))
 
 def p_termino(p):
     '''termino : factor
@@ -294,7 +313,7 @@ def p_elemento_concatenable(p):
 # Imprimir
 def p_imprimir(p):
     '''imprimir : IMPRIMIR PAREN_ABRIR elemento_imprimir_list PAREN_CERRAR'''
-    p[0] = Imprimir(p[3])
+    p[0] = Imprimir(p[3], linea=p.lineno(1))
 
 def p_elemento_imprimir_list(p):
     '''elemento_imprimir_list : elemento_imprimir_list SEPARADOR elemento_imprimir
@@ -336,7 +355,7 @@ def p_elemento_arreglo(p):
 
 def p_acceso_arreglo(p):
     '''acceso_arreglo : ID CORCHETE_ABRIR NUMERO CORCHETE_CERRAR'''
-    p[0] = AccesoArreglo(p[1], p[3])
+    p[0] = AccesoArreglo(p[1], p[3], linea=p.lineno(1))
 
 # Tablas
 def p_declaracion_tabla(p):
@@ -362,7 +381,7 @@ def p_acceso_tabla(p):
 # Estructuras de control
 def p_estructura_si(p):
     '''estructura_si : SI PAREN_ABRIR expresion PAREN_CERRAR LLAVE_ABRIR bloque_codigo LLAVE_CERRAR sinosis_opt'''
-    p[0] = EstructuraSi(p[3], p[6], p[8])
+    p[0] = EstructuraSi(p[3], p[6], p[8], linea=p.lineno(1))
 
 def p_sinosis_opt(p):
     '''sinosis_opt : sinosis
@@ -379,7 +398,7 @@ def p_sinosis(p):
 
 def p_estructura_mientras(p):
     '''estructura_mientras : MIENTRAS PAREN_ABRIR expresion PAREN_CERRAR LLAVE_ABRIR bloque_codigo LLAVE_CERRAR'''
-    p[0] = EstructuraMientras(p[3], p[6])
+    p[0] = EstructuraMientras(p[3], p[6], linea=p.lineno(1))
 
 def p_estructura_para(p):
     '''estructura_para : PARA PAREN_ABRIR VAL ID ASIGNACION expresion PUNTO_COMA expresion PUNTO_COMA expresion PAREN_CERRAR LLAVE_ABRIR bloque_codigo LLAVE_CERRAR'''
@@ -437,7 +456,7 @@ def p_bloque_finalmente_opt(p):
 # Funciones
 def p_declaracion_funcion(p):
     '''declaracion_funcion : FUN ID PAREN_ABRIR parametros_opt PAREN_CERRAR LLAVE_ABRIR bloque_codigo retorno_funcion_opt LLAVE_CERRAR'''
-    p[0] = DeclaracionFuncion(p[2], p[4], p[7], p[8])
+    p[0] = DeclaracionFuncion(p[2], p[4], p[7], p[8], linea=p.lineno(1))
 
 def p_parametros_opt(p):
     '''parametros_opt : parametros

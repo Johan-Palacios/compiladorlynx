@@ -462,9 +462,13 @@ fun saludar(nombre) {
 
       const data = await response.json();
 
-      setTokens(data.tokens || []);
-      setErrores(data.errores || []);
-      setAst(data.ast || null);
+      if (tipo === 'semantico') {
+        setErrores(data.errores || []);
+      } else {
+        setTokens(data.tokens || []);
+        setErrores(data.errores || []);
+        setAst(data.ast || null);
+      }
 
     } catch (error) {
       console.error('Error:', error);
@@ -474,7 +478,6 @@ fun saludar(nombre) {
       setCargando(false);
     }
   };
-
   const limpiar = () => {
     setCodigo('');
     setTokens([]);

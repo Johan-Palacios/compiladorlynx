@@ -7,10 +7,11 @@ import traceback
 # Importar nuestros analizadores
 from lexer_lynx import analizar_lexico
 from parser_lynx import analizar_sintactico
+from semantic_lynx import AnalizadorSemantico
 
 app = FastAPI(title="Analizador Lynx", version="1.0.0")
 
-# Configurar CORS para permitir requests desde frontend
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:4321", "http://localhost:3000", "http://localhost:5173", "*"],
@@ -45,30 +46,24 @@ class AnalisisLexicoResponse(BaseModel):
     errores: List[str]
     exito: bool
 
-# Función auxiliar para convertir AST a diccionario
+class AnalisisSemanticoResponse(BaseModel):
+    errores: List[str]
+    exito: bool
+
 def ast_to_dict(node) -> Optional[Dict[str, Any]]:
-    """Convierte un nodo AST a diccionario para serialización JSON"""
     if node is None:
         return None
-    
     if isinstance(node, (str, int, float, bool)):
         return {"valor": node, "tipo_primitivo": type(node).__name__}
-    
     if isinstance(node, list):
-        return {
-            "tipo": "lista",
-            "elementos": [ast_to_dict(item) for item in node]
-        }
-    
+        return {"tipo": "lista", "elementos": [ast_to_dict(item) for item in node]}
     if isinstance(node, tuple):
-        return {
-            "tipo": "tupla", 
-            "elementos": [ast_to_dict(item) for item in node]
-        }
-    
+        return {"tipo": "tupla", "elementos": [ast_to_dict(item) for item in node]}
     if hasattr(node, '__dict__'):
-        result = {'tipo': node.__class__.__name__}
+        result = {'tipo': node.__class__.__name__, 'linea': node.linea}
         for key, value in node.__dict__.items():
+            if key == 'linea':
+                continue
             if isinstance(value, (str, int, float, bool)):
                 result[key] = {"valor": value, "tipo_primitivo": type(value).__name__}
             elif isinstance(value, (list, tuple)):
@@ -80,7 +75,6 @@ def ast_to_dict(node) -> Optional[Dict[str, Any]]:
             else:
                 result[key] = {"valor": str(value), "tipo_primitivo": "string"}
         return result
-    
     return {"valor": str(node), "tipo_primitivo": "string"}
 
 @app.get("/")
@@ -93,11 +87,7 @@ async def health_check():
 
 @app.post("/analizar", response_model=AnalisisResponse)
 async def analizar_codigo(request: CodigoRequest):
-    """
-    Analiza el código tanto léxica como sintácticamente
-    """
     try:
-        # Validar que el código no esté vacío
         if not request.codigo.strip():
             return AnalisisResponse(
                 tokens=[],
@@ -106,24 +96,17 @@ async def analizar_codigo(request: CodigoRequest):
                 exito=False
             )
         
-        # Análisis léxico
         tokens_data, errores_lexicos = analizar_lexico(request.codigo)
-        
-        # Convertir tokens a objetos Token
         tokens = [Token(**token_data) for token_data in tokens_data]
-        
         errores_totales = errores_lexicos.copy()
         ast_dict = None
         
-        # Si no hay errores léxicos, proceder con análisis sintáctico
         if not errores_lexicos:
             try:
                 ast, errores_sintacticos = analizar_sintactico(request.codigo)
                 errores_totales.extend(errores_sintacticos)
-                
                 if ast is not None:
                     ast_dict = ast_to_dict(ast)
-                    
             except Exception as e:
                 errores_totales.append(f"Error en análisis sintáctico: {str(e)}")
                 print(f"Error sintáctico detallado: {traceback.format_exc()}")
@@ -144,9 +127,6 @@ async def analizar_codigo(request: CodigoRequest):
 
 @app.post("/analizar-lexico", response_model=AnalisisLexicoResponse)
 async def analizar_solo_lexico(request: CodigoRequest):
-    """
-    Realiza únicamente el análisis léxico del código
-    """
     try:
         if not request.codigo.strip():
             return AnalisisLexicoResponse(
@@ -173,9 +153,6 @@ async def analizar_solo_lexico(request: CodigoRequest):
 
 @app.post("/analizar-sintactico", response_model=AnalisisSintacticoResponse)
 async def analizar_solo_sintactico(request: CodigoRequest):
-    """
-    Realiza únicamente el análisis sintáctico del código
-    """
     try:
         if not request.codigo.strip():
             return AnalisisSintacticoResponse(
@@ -184,9 +161,7 @@ async def analizar_solo_sintactico(request: CodigoRequest):
                 exito=False
             )
         
-        # Primero verificar que no hay errores léxicos
         _, errores_lexicos = analizar_lexico(request.codigo)
-        
         if errores_lexicos:
             return AnalisisSintacticoResponse(
                 ast=None,
@@ -208,6 +183,47 @@ async def analizar_solo_sintactico(request: CodigoRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error en análisis sintáctico: {str(e)}"
+        )
+
+@app.post("/analizar-semantico", response_model=AnalisisSemanticoResponse)
+async def analizar_solo_semantico(request: CodigoRequest):
+    try:
+        if not request.codigo.strip():
+            return AnalisisSemanticoResponse(
+                errores=["El código no puede estar vacío"],
+                exito=False
+            )
+        
+        # Verificar análisis léxico
+        _, errores_lexicos = analizar_lexico(request.codigo)
+        if errores_lexicos:
+            return AnalisisSemanticoResponse(
+                errores=["No se puede realizar análisis semántico: existen errores léxicos"] + errores_lexicos,
+                exito=False
+            )
+        
+        # Verificar análisis sintáctico
+        ast, errores_sintacticos = analizar_sintactico(request.codigo)
+        if errores_sintacticos:
+            return AnalisisSemanticoResponse(
+                errores=["No se puede realizar análisis semántico: existen errores sintácticos"] + errores_sintacticos,
+                exito=False
+            )
+        
+        # Análisis semántico
+        analizador = AnalizadorSemantico()
+        errores_semanticos = analizador.analizar(ast, request.codigo)
+        
+        return AnalisisSemanticoResponse(
+            errores=errores_semanticos,
+            exito=len(errores_semanticos) == 0
+        )
+        
+    except Exception as e:
+        print(f"Error en análisis semántico: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error en análisis semántico: {str(e)}"
         )
 
 if __name__ == "__main__":

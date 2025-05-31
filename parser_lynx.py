@@ -355,7 +355,7 @@ def p_elemento_arreglo(p):
 
 def p_acceso_arreglo(p):
     '''acceso_arreglo : ID CORCHETE_ABRIR NUMERO CORCHETE_CERRAR'''
-    p[0] = AccesoArreglo(p[1], p[3], linea=p.lineno(1))
+    p[0] = AccesoArreglo(p[1], p[3])
 
 # Tablas
 def p_declaracion_tabla(p):

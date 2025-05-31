@@ -931,7 +931,7 @@ fun saludar(nombre) {
 
         <div className="mt-8 text-center text-gray-500 text-sm">
           <p>Editor Lynx v2.0 - Desarrollado con React y Monaco Editor</p>
-          <p>Soporte para análisis léxico, sintáctico, semántico y ejecución de código</p>
+          <p>Soporte para análisis léxico, sintáctico y semántico</p>
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
+from semantic_lynx import AnalizadorSemantico, ResultadoAnalisisSemantico
 import traceback
 
 # Importar nuestros analizadores
@@ -49,6 +50,8 @@ class AnalisisLexicoResponse(BaseModel):
 class AnalisisSemanticoResponse(BaseModel):
     errores: List[str]
     exito: bool
+    tabla_simbolos: Optional[Dict[str, Any]] = None  # Agregamos la tabla de s├¡mbolos
+    advertencias: List[str] = []  # Agregamos advertencias
 
 def ast_to_dict(node) -> Optional[Dict[str, Any]]:
     if node is None:
@@ -185,45 +188,60 @@ async def analizar_solo_sintactico(request: CodigoRequest):
             detail=f"Error en análisis sintáctico: {str(e)}"
         )
 
+
 @app.post("/analizar-semantico", response_model=AnalisisSemanticoResponse)
 async def analizar_solo_semantico(request: CodigoRequest):
     try:
         if not request.codigo.strip():
             return AnalisisSemanticoResponse(
                 errores=["El código no puede estar vacío"],
-                exito=False
+                exito=False,
+                tabla_simbolos={},
+                advertencias=[]
             )
         
-        # Verificar análisis léxico
-        _, errores_lexicos = analizar_lexico(request.codigo)
+        print("Analizando código:", request.codigo)  # Debug log
+        
+        # Análisis léxico y sintáctico
+        tokens, errores_lexicos = analizar_lexico(request.codigo)
         if errores_lexicos:
             return AnalisisSemanticoResponse(
                 errores=["No se puede realizar análisis semántico: existen errores léxicos"] + errores_lexicos,
-                exito=False
+                exito=False,
+                tabla_simbolos={},
+                advertencias=[]
             )
         
-        # Verificar análisis sintáctico
         ast, errores_sintacticos = analizar_sintactico(request.codigo)
+        print("AST generado:", ast_to_dict(ast))  # Debug log
+        
         if errores_sintacticos:
             return AnalisisSemanticoResponse(
                 errores=["No se puede realizar análisis semántico: existen errores sintácticos"] + errores_sintacticos,
-                exito=False
+                exito=False,
+                tabla_simbolos={},
+                advertencias=[]
             )
-        
+
         # Análisis semántico
         analizador = AnalizadorSemantico()
-        errores_semanticos = analizador.analizar(ast, request.codigo)
+        resultado = analizador.analizar(ast, request.codigo)
+        
+        print("Resultado del análisis semántico:", resultado)  # Debug log
         
         return AnalisisSemanticoResponse(
-            errores=errores_semanticos,
-            exito=len(errores_semanticos) == 0
+            errores=resultado['errores'],
+            advertencias=resultado['advertencias'],
+            tabla_simbolos=resultado['tabla_simbolos'],
+            exito=len(resultado['errores']) == 0
         )
-        
     except Exception as e:
         print(f"Error en análisis semántico: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error en análisis semántico: {str(e)}"
+        return AnalisisSemanticoResponse(
+            errores=[f"Error interno: {str(e)}"],
+            exito=False,
+            tabla_simbolos={},
+            advertencias=[]
         )
 
 if __name__ == "__main__":

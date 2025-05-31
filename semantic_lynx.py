@@ -1,220 +1,726 @@
-from collections import defaultdict
-from parser_lynx import *
+from typing import Dict, Optional, List, Any, TypedDict
 
-class TablaSimbolos:
-    def __init__(self):
-        self.tabla = defaultdict(dict)  # Ámbito global
-        self.ambitos = [self.tabla]  # Lista de ámbitos (para funciones o bloques)
+class ResultadoAnalisisSemantico(TypedDict):
+    errores: List[str]
+    advertencias: List[str]
+    tabla_simbolos: Dict[str, Any]
 
-    def entrar_ambito(self):
-        nuevo_ambito = defaultdict(dict)
-        self.ambitos.append(nuevo_ambito)
-        return nuevo_ambito
 
-    def salir_ambito(self):
-        self.ambitos.pop()
+class Simbolo:
+    def __init__(
+        self,
+        nombre: str,
+        tipo: str,
+        valor: Any = None,
+        linea: Optional[int] = None,
+        es_constante: bool = False,
+        parametros: Optional[List[str]] = None,
+        inicializado: bool = False,
+        tipo_retorno: Optional[str] = None,
+        usado: bool = False,
+        declarado: bool = False,
+    ):
+        self.nombre = nombre
+        self.tipo = tipo  # 'entero', 'flotante', 'cadena', 'arreglo', 'tabla', 'funcion', 'booleano'
+        self.valor = valor
+        self.linea = linea
+        self.es_constante = es_constante
+        self.parametros = parametros or []
+        self.inicializado = inicializado
+        self.tipo_retorno = tipo_retorno
+        self.usado = usado
+        self.declarado = declarado
 
-    def declarar_variable(self, nombre, tipo=None, inicializada=False, linea=None):
-        ambito_actual = self.ambitos[-1]
-        if nombre in ambito_actual:
-            return f"Error semántico: Variable '{nombre}' ya declarada en la línea {linea}"
-        ambito_actual[nombre] = {'tipo': tipo, 'inicializada': inicializada, 'linea': linea}
-        return None
+    def to_dict(self):
+        return {
+            "nombre": self.nombre,
+            "tipo": self.tipo,
+            "valor": self.valor,
+            "linea": self.linea,
+            "es_constante": self.es_constante,
+            "parametros": self.parametros,
+            "tipo_retorno": self.tipo_retorno,
+            "inicializado": self.inicializado,
+            "usado": self.usado,
+        }
 
-    def usar_variable(self, nombre, linea):
-        for ambito in reversed(self.ambitos):
-            if nombre in ambito:
-                if not ambito[nombre]['inicializada']:
-                    return f"Error semántico: Variable '{nombre}' usada antes de inicializarse en la línea {linea}"
-                return ambito[nombre]['tipo']
-        return f"Error semántico: Variable '{nombre}' no declarada en la línea {linea}"
-
-    def declarar_funcion(self, nombre, parametros, tipo_retorno=None, linea=None):
-        ambito_global = self.ambitos[0]
-        if nombre in ambito_global:
-            return f"Error semántico: Función '{nombre}' ya declarada en la línea {linea}"
-        ambito_global[nombre] = {'tipo': 'funcion', 'parametros': parametros, 'tipo_retorno': tipo_retorno, 'linea': linea}
-        return None
-
-    def usar_funcion(self, nombre, num_args, linea):
-        ambito_global = self.ambitos[0]
-        if nombre not in ambito_global or ambito_global[nombre]['tipo'] != 'funcion':
-            return f"Error semántico: Función '{nombre}' no declarada en la línea {linea}"
-        if len(ambito_global[nombre]['parametros']) != num_args:
-            return f"Error semántico: La función '{nombre}' espera {len(ambito_global[nombre]['parametros'])} argumentos, pero se proporcionaron {num_args} en la línea {linea}"
-        return ambito_global[nombre]['tipo_retorno']
 
 class AnalizadorSemantico:
     def __init__(self):
-        self.tabla_simbolos = TablaSimbolos()
-        self.errores = []
-        self.current_line = 1  # Para rastrear la línea actual
+        self.tabla_simbolos: Dict[str, Simbolo] = {}
+        self.ambitos: List[Dict[str, Simbolo]] = [{}]  # Stack de ámbitos
+        self.errores: List[str] = []
+        self.advertencias: List[str] = []
+        self.funciones_declaradas: Dict[str, Simbolo] = {}
+        self.en_funcion = False
+        self.tipo_retorno_esperado = None
+        self.bucles_anidados = 0
+        self.codigo_fuente = ""
 
-    def analizar(self, ast, codigo):
-        if ast is None:
-            self.errores.append("Error: AST no generado")
-            return self.errores
-        # Dividir el código en líneas para rastrear números de línea
-        self.lineas = codigo.split('\n')
-        self.visitar(ast)
-        return self.errores
-
-    def visitar(self, nodo, linea=None):
-        if isinstance(nodo, Programa):
-            for instruccion in nodo.instrucciones:
-                self.visitar(instruccion, linea=self.current_line)
-                self.current_line += str(instruccion).count('\n') + 1
-
-        elif isinstance(nodo, DeclaracionVariable):
-            tipo = self.inferir_tipo(nodo.valor) if nodo.valor else None
-            error = self.tabla_simbolos.declarar_variable(nodo.nombre, tipo=tipo, inicializada=nodo.valor is not None, linea=linea)
-            if error:
-                self.errores.append(error)
-            if nodo.valor:
-                self.visitar(nodo.valor, linea)
-
-        elif isinstance(nodo, AsignacionVariable):
-            tipo_var = self.tabla_simbolos.usar_variable(nodo.nombre, linea)
-            if isinstance(tipo_var, str):  # Error
-                self.errores.append(tipo_var)
-            else:
-                tipo_valor = self.inferir_tipo(nodo.valor)
-                if tipo_var and tipo_valor and tipo_var != tipo_valor:
-                    self.errores.append(f"Error semántico: Asignación de tipo '{tipo_valor}' a variable de tipo '{tipo_var}' en la línea {linea}")
-                self.visitar(nodo.valor, linea)
-
-        elif isinstance(nodo, DeclaracionArreglo):
-            error = self.tabla_simbolos.declarar_variable(nodo.nombre, tipo='arreglo', inicializada=True, linea=linea)
-            if error:
-                self.errores.append(error)
-            for elemento in nodo.elementos:
-                tipo_elem = self.inferir_tipo(elemento)
-                if tipo_elem not in ['cadena', 'entero', 'flotante']:
-                    self.errores.append(f"Error semántico: Elemento de arreglo de tipo '{tipo_elem}' no soportado en la línea {linea}")
-                self.visitar(elemento, linea)
-
-        elif isinstance(nodo, EstructuraSi):
-            self.visitar(nodo.condicion, linea)
-            tipo_cond = self.inferir_tipo(nodo.condicion)
-            if tipo_cond not in ['entero', 'flotante', 'cadena', None]:
-                self.errores.append(f"Error semántico: Condición de 'si' debe ser una expresión lógica, no '{tipo_cond}' en la línea {linea}")
-            self.tabla_simbolos.entrar_ambito()
-            for instruccion in nodo.bloque:
-                self.visitar(instruccion, linea)
-            self.tabla_simbolos.salir_ambito()
-            if nodo.sinosis:
-                for sinosi in nodo.sinosis:
-                    if sinosi[0] == 'sinosi':
-                        self.visitar(sinosi[1], linea)  # Condición
-                        tipo_cond = self.inferir_tipo(sinosi[1])
-                        if tipo_cond not in ['entero', 'flotante', 'cadena', None]:
-                            self.errores.append(f"Error semántico: Condición de 'sinosi' debe ser una expresión lógica, no '{tipo_cond}' en la línea {linea}")
-                        self.tabla_simbolos.entrar_ambito()
-                        for instruccion in sinosi[2]:
-                            self.visitar(instruccion, linea)
-                        self.tabla_simbolos.salir_ambito()
-                    else:  # sino
-                        self.tabla_simbolos.entrar_ambito()
-                        for instruccion in sinosi[1]:
-                            self.visitar(instruccion, linea)
-                        self.tabla_simbolos.salir_ambito()
-
-        elif isinstance(nodo, EstructuraMientras):
-            self.visitar(nodo.condicion, linea)
-            tipo_cond = self.inferir_tipo(nodo.condicion)
-            if tipo_cond not in ['entero', 'flotante', 'cadena', None]:
-                self.errores.append(f"Error semántico: Condición de 'mientras' debe ser una expresión lógica, no '{tipo_cond}' en la línea {linea}")
-            self.tabla_simbolos.entrar_ambito()
-            for instruccion in nodo.bloque:
-                self.visitar(instruccion, linea)
-            self.tabla_simbolos.salir_ambito()
-
-        elif isinstance(nodo, DeclaracionFuncion):
-            error = self.tabla_simbolos.declarar_funcion(nodo.nombre, nodo.parametros, tipo_retorno=None, linea=linea)
-            if error:
-                self.errores.append(error)
-            self.tabla_simbolos.entrar_ambito()
-            for param in nodo.parametros:
-                self.tabla_simbolos.declarar_variable(param, tipo=None, inicializada=True, linea=linea)
-            for instruccion in nodo.bloque:
-                self.visitar(instruccion, linea)
-            if nodo.retorno:
-                self.visitar(nodo.retorno, linea)
-            self.tabla_simbolos.salir_ambito()
-
-        elif isinstance(nodo, Imprimir):
-            for elemento in nodo.elementos:
-                self.visitar(elemento, linea)
-
-        elif isinstance(nodo, ExpresionBinaria):
-            tipo_izq = self.visitar(nodo.izq, linea)
-            tipo_der = self.visitar(nodo.der, linea)
-            if nodo.op in ['+', '-', '*', '/', '%']:
-                if not self.tipos_compatible_aritmetica(tipo_izq, tipo_der):
-                    self.errores.append(f"Error semántico: Tipos incompatibles '{tipo_izq}' y '{tipo_der}' para operación '{nodo.op}' en la línea {linea}")
-            elif nodo.op in ['==', '!=', '<', '>', '<=', '>=']:
-                if not self.tipos_compatible_comparacion(tipo_izq, tipo_der):
-                    self.errores.append(f"Error semántico: Tipos incompatibles '{tipo_izq}' y '{tipo_der}' para comparación '{nodo.op}' en la línea {linea}")
-            elif nodo.op in ['y', 'o']:
-                if tipo_izq not in ['entero', 'flotante', 'cadena', None] or tipo_der not in ['entero', 'flotante', 'cadena', None]:
-                    self.errores.append(f"Error semántico: Tipos incompatibles '{tipo_izq}' y '{tipo_der}' para operación lógica '{nodo.op}' en la línea {linea}")
-            return self.inferir_tipo(nodo)
-
-        elif isinstance(nodo, AccesoArreglo):
-            tipo = self.tabla_simbolos.usar_variable(nodo.nombre, linea)
-            if isinstance(tipo, str):  # Error
-                self.errores.append(tipo)
-            elif tipo != 'arreglo':
-                self.errores.append(f"Error semántico: '{nodo.nombre}' no es un arreglo en la línea {linea}")
-            tipo_indice = self.inferir_tipo(nodo.indice)
-            if tipo_indice != 'entero':
-                self.errores.append(f"Error semántico: El índice del arreglo debe ser de tipo 'entero', no '{tipo_indice}' en la línea {linea}")
-            self.visitar(nodo.indice, linea)
-            return 'entero'  # Suponiendo que los elementos del arreglo son de tipo homogéneo
-
-        elif isinstance(nodo, str):
-            return 'cadena'
-        elif isinstance(nodo, int):
-            return 'entero'
-        elif isinstance(nodo, float):
-            return 'flotante'
-        elif isinstance(nodo, list):
-            for elemento in nodo:
-                self.visitar(elemento, linea)
-            return 'arreglo'
-        elif nodo is None:
-            return None
+    def error(self, mensaje: str, linea: Optional[int] = None):
+        if linea:
+            self.errores.append(f"Error semántico línea {linea}: {mensaje}")
         else:
-            raise ValueError(f"Tipo de nodo no soportado: {type(nodo)} en la línea {linea}")
+            self.errores.append(f"Error semántico: {mensaje}")
 
-    def inferir_tipo(self, valor):
-        if isinstance(valor, str):
-            return 'cadena'
-        elif isinstance(valor, int):
-            return 'entero'
-        elif isinstance(valor, float):
-            return 'flotante'
-        elif isinstance(valor, list):
-            return 'arreglo'
-        elif isinstance(valor, ExpresionBinaria):
-            tipo_izq = self.inferir_tipo(valor.izq)
-            tipo_der = self.inferir_tipo(valor.der)
-            if valor.op == '+':
-                if tipo_izq == 'cadena' or tipo_der == 'cadena':
-                    return 'cadena'
-                return 'entero' if tipo_izq == 'entero' and tipo_der == 'entero' else 'flotante'
-            elif valor.op in ['-', '*', '/', '%']:
-                return 'entero' if tipo_izq == 'entero' and tipo_der == 'entero' else 'flotante'
-            elif valor.op in ['==', '!=', '<', '>', '<=', '>=', 'y', 'o']:
-                return 'entero'  # Resultado de comparaciones y lógicas es entero (0 o 1)
-        elif isinstance(valor, AccesoArreglo):
-            return 'entero'  # Suponiendo tipo homogéneo para elementos de arreglos
+    def advertencia(self, mensaje: str, linea: Optional[int] = None):
+        if linea:
+            self.advertencias.append(f"Advertencia línea {linea}: {mensaje}")
+        else:
+            self.advertencias.append(f"Advertencia: {mensaje}")
+
+    def nuevo_ambito(self):
+        """Crear un nuevo ámbito (scope)"""
+        self.ambitos.append({})
+
+    def cerrar_ambito(self):
+        """Cerrar el ámbito actual"""
+        if len(self.ambitos) > 1:
+            # Verificar variables no utilizadas en el ámbito que se cierra
+            ambito_actual = self.ambitos[-1]
+            for simbolo in ambito_actual.values():
+                if not simbolo.usado and simbolo.tipo != "funcion":
+                    self.advertencia(
+                        f"Variable '{simbolo.nombre}' declarada pero no utilizada",
+                        simbolo.linea,
+                    )
+            self.ambitos.pop()
+
+    def buscar_simbolo(self, nombre: str) -> Optional[Simbolo]:
+        """Buscar un símbolo en todos los ámbitos, desde el más interno al más externo"""
+        for ambito in reversed(self.ambitos):
+            if nombre in ambito:
+                simbolo = ambito[nombre]
+                if not simbolo.declarado:
+                    self.error(f"Variable '{nombre}' usada antes de ser declarada")
+                return simbolo
         return None
 
-    def tipos_compatible_aritmetica(self, tipo1, tipo2):
-        return tipo1 in ['entero', 'flotante', None] and tipo2 in ['entero', 'flotante', None]
+    def declarar_simbolo(self, simbolo: Simbolo) -> bool:
+        """Declarar un símbolo en el ámbito actual"""
+        ambito_actual = self.ambitos[-1]
 
-    def tipos_compatible_comparacion(self, tipo1, tipo2):
-        if tipo1 == 'arreglo' or tipo2 == 'arreglo':
+        # Verificar si ya existe en el ámbito actual
+        if simbolo.nombre in ambito_actual:
             return False
-        return tipo1 in ['cadena', 'entero', 'flotante', None] and tipo2 in ['cadena', 'entero', 'flotante', None]
+
+        # Marcar como declarado y agregarlo al ámbito actual
+        simbolo.declarado = True
+        ambito_actual[simbolo.nombre] = simbolo
+        # También agregarlo a la tabla global para el reporte final
+        self.tabla_simbolos[simbolo.nombre] = simbolo
+        return True
+
+    def inferir_tipo(self, valor: Any) -> str:
+        """Inferir el tipo de un valor"""
+        if isinstance(valor, int):
+            return "entero"
+        elif isinstance(valor, float):
+            return "flotante"
+        elif isinstance(valor, str):
+            return "cadena"
+        elif isinstance(valor, bool):
+            return "booleano"
+        elif isinstance(valor, list):
+            # Inferir tipo de elementos del arreglo si es posible
+            if len(valor) > 0:
+                tipo_elementos = {self.inferir_tipo(elem) for elem in valor}
+                if len(tipo_elementos) == 1:
+                    return f"arreglo<{tipo_elementos.pop()}>"
+            return "arreglo<desconocido>"
+        elif isinstance(valor, dict):
+            return "tabla"
+        else:
+            return "desconocido"
+
+    def tipos_compatibles(
+        self, tipo1: str, tipo2: str, operacion: Optional[str] = None
+    ) -> bool:
+        """Determinar si dos tipos son compatibles para una operación"""
+        # Si son del mismo tipo, siempre son compatibles
+        if tipo1 == tipo2:
+            return True
+
+        # Para el operador +
+        if operacion == "+":
+            # Permitir concatenación si alguno es cadena
+            if "cadena" in [tipo1, tipo2]:
+                return True
+            # Permitir operaciones entre números
+            if tipo1 in ["entero", "flotante"] and tipo2 in ["entero", "flotante"]:
+                return True
+            return False
+
+        # Para comparaciones (==, !=, <, >, <=, >=)
+        if operacion in ["==", "!=", "<", ">", "<=", ">="]:
+            # Permitir comparaciones entre tipos numéricos
+            if tipo1 in ["entero", "flotante"] and tipo2 in ["entero", "flotante"]:
+                return True
+            # Permitir comparaciones con cadenas
+            if "cadena" in [tipo1, tipo2]:
+                return True
+            return False
+
+        # Para operaciones aritméticas
+        if operacion in ["-", "*", "/", "%"]:
+            return tipo1 in ["entero", "flotante"] and tipo2 in ["entero", "flotante"]
+
+        return False
+
+    def evaluar_expresion(self, nodo) -> tuple[str, Any]:
+        """Evaluar una expresión y retornar su tipo y valor (si es posible)"""
+        if nodo is None:
+            return "nulo", None
+
+        # Manejar literales
+        if isinstance(nodo, str):
+            return "cadena", nodo
+        if isinstance(nodo, int):
+            return "entero", nodo
+        if isinstance(nodo, float):
+            return "flotante", nodo
+        if isinstance(nodo, bool):
+            return "booleano", nodo
+
+        # Nodos del AST
+        if hasattr(nodo, "__class__"):
+            clase = nodo.__class__.__name__
+
+            if clase == "ExpresionBinaria":
+                return self.evaluar_expresion_binaria(nodo)
+            elif clase == "ExpresionUnaria":
+                return self.evaluar_expresion_unaria(nodo)
+            elif clase == "AccesoArreglo":
+                return self.evaluar_acceso_arreglo(nodo)
+            elif clase == "AccesoTabla":
+                return self.evaluar_acceso_tabla(nodo)
+            elif clase == "LlamadaFuncion":
+                return self.evaluar_llamada_funcion(nodo)
+            elif clase == "Identificador":
+                return self.evaluar_identificador(nodo)
+
+        # Si es un identificador como string
+        if isinstance(nodo, str):
+            simbolo = self.buscar_simbolo(nodo)
+            if simbolo:
+                simbolo.usado = True
+                return simbolo.tipo, simbolo.valor
+            else:
+                self.error(f"Variable '{nodo}' no declarada")
+                return "desconocido", None
+
+        return "desconocido", None
+
+    def evaluar_identificador(self, nodo) -> tuple[str, Any]:
+        """Evaluar un identificador (variable)"""
+        nombre = nodo.nombre
+        simbolo = self.buscar_simbolo(nombre)
+        print(
+            f"evaluar_identificador: Nombre = {nombre}, Simbolo = {simbolo}"
+        )  # Debug log
+
+        if simbolo:
+            if not simbolo.declarado:
+                self.error(
+                    f"Variable '{nombre}' usada antes de ser declarada", nodo.linea
+                )
+                return "desconocido", None
+            simbolo.usado = True
+            return simbolo.tipo, simbolo.valor
+        else:
+            self.error(f"Variable '{nombre}' no declarada", nodo.linea)
+            return "desconocido", None
+
+    def evaluar_llamada_funcion(self, nodo):
+        """Evaluar llamada a función"""
+        nombre_funcion = nodo.nombre if hasattr(nodo, "nombre") else str(nodo.funcion)
+
+        # Verificar si la función existe
+        simbolo = self.buscar_simbolo(nombre_funcion)
+        if not simbolo:
+            self.error(
+                f"Función '{nombre_funcion}' no declarada", getattr(nodo, "linea", None)
+            )
+            return "desconocido", None
+
+        if simbolo.tipo != "funcion":
+            self.error(
+                f"'{nombre_funcion}' no es una función", getattr(nodo, "linea", None)
+            )
+            return "desconocido", None
+
+        simbolo.usado = True
+
+        # Evaluar argumentos
+        if hasattr(nodo, "argumentos"):
+            for arg in nodo.argumentos:
+                self.evaluar_expresion(arg)
+
+        return simbolo.tipo_retorno or "nulo", None
+
+    def evaluar_expresion_binaria(self, nodo) -> tuple[str, Any]:
+        """Evaluar expresión binaria"""
+        tipo_izq, val_izq = self.evaluar_expresion(nodo.izq)
+        tipo_der, val_der = self.evaluar_expresion(nodo.der)
+        operador = nodo.op
+
+        # Para operador +
+        if operador == "+":
+            # Si alguno es cadena, el resultado es cadena
+            if tipo_izq == "cadena" or tipo_der == "cadena":
+                return "cadena", None
+            # Si ambos son números
+            if tipo_izq in ["entero", "flotante"] and tipo_der in [
+                "entero",
+                "flotante",
+            ]:
+                if tipo_izq == "flotante" or tipo_der == "flotante":
+                    return "flotante", None
+                return "entero", None
+            # Si no es ninguno de los casos anteriores
+            self.error(
+                f"Tipos incompatibles para suma: {tipo_izq} + {tipo_der}", nodo.linea
+            )
+            return "desconocido", None
+
+        # Para otros operadores aritméticos
+        if operador in ["-", "*", "/", "%"]:
+            if not (
+                tipo_izq in ["entero", "flotante"]
+                and tipo_der in ["entero", "flotante"]
+            ):
+                self.error(
+                    f"Operador '{operador}' requiere operandos numéricos", nodo.linea
+                )
+                return "desconocido", None
+            if tipo_izq == "flotante" or tipo_der == "flotante":
+                return "flotante", None
+            return "entero", None
+
+        # Para operadores de comparación
+        if operador in ["==", "!=", "<", ">", "<=", ">="]:
+            # No emitir error en comparaciones entre cadenas y otros tipos
+            return "booleano", None
+
+        # Para operadores lógicos
+        if operador in ["y", "o"]:
+            if tipo_izq != "booleano":
+                self.error(
+                    f"Operando izquierdo de '{operador}' debe ser booleano", nodo.linea
+                )
+            if tipo_der != "booleano":
+                self.error(
+                    f"Operando derecho de '{operador}' debe ser booleano", nodo.linea
+                )
+            return "booleano", None
+
+        return "desconocido", None
+
+    def evaluar_expresion_unaria(self, nodo) -> tuple[str, Any]:
+        """Evaluar expresión unaria"""
+        tipo_expr, val_expr = self.evaluar_expresion(nodo.expr)
+        operador = nodo.op
+        linea = getattr(nodo, "linea", None)
+
+        if operador in ["-", "+"]:
+            # Eliminamos la verificación de tipos
+            return tipo_expr, None
+        elif operador == "no":
+            if tipo_expr != "booleano":
+                self.error(f"Operador 'no' requiere operando booleano", linea)
+                return "desconocido", None
+            return "booleano", None
+
+        return "desconocido", None
+
+    def evaluar_acceso_arreglo(self, nodo) -> tuple[str, Any]:
+        """Evaluar acceso a arreglo"""
+        nombre = nodo.nombre if hasattr(nodo, "nombre") else str(nodo.arreglo)
+        simbolo = self.buscar_simbolo(nombre)
+        linea = getattr(nodo, "linea", None)
+
+        if not simbolo:
+            self.error(f"Arreglo '{nombre}' no declarado", linea)
+            return "desconocido", None
+
+        if not simbolo.tipo.startswith("arreglo") and simbolo.tipo != "arreglo":
+            self.error(f"'{nombre}' no es un arreglo", linea)
+            return "desconocido", None
+
+        simbolo.usado = True
+        tipo_indice, valor_indice = self.evaluar_expresion(nodo.indice)
+
+        if tipo_indice != "entero":
+            self.error(f"El índice de arreglo debe ser entero", linea)
+            return "desconocido", None
+
+        # Si el arreglo tiene elementos, intentamos inferir el tipo
+        if simbolo.valor and len(simbolo.valor) > 0:
+            tipo_elemento = self.inferir_tipo(simbolo.valor[0])
+            return tipo_elemento, None
+
+        return "desconocido", None
+
+    def evaluar_acceso_tabla(self, nodo) -> tuple[str, Any]:
+        """Evaluar acceso a tabla"""
+        nombre = nodo.nombre if hasattr(nodo, "nombre") else str(nodo.tabla)
+        simbolo = self.buscar_simbolo(nombre)
+        linea = getattr(nodo, "linea", None)
+
+        if not simbolo:
+            self.error(f"Tabla '{nombre}' no declarada", linea)
+            return "desconocido", None
+
+        if simbolo.tipo != "tabla":
+            self.error(f"'{nombre}' no es una tabla", linea)
+            return "desconocido", None
+
+        simbolo.usado = True
+        tipo_clave, _ = self.evaluar_expresion(nodo.clave)
+        if tipo_clave != "cadena":
+            self.error(f"Clave de tabla debe ser cadena", linea)
+
+        return "desconocido", None
+
+    def visitar_nodo(self, nodo):
+        if nodo is None or isinstance(nodo, (str, int, float, bool)):
+            return
+
+        if isinstance(nodo, (list, tuple)):
+            for item in nodo:
+                self.visitar_nodo(item)
+            return
+
+        if not hasattr(nodo, "__class__"):
+            return
+
+        clase = nodo.__class__.__name__
+        metodo = f"visitar_{clase}"
+
+        if hasattr(self, metodo):
+            getattr(self, metodo)(nodo)
+        else:
+            for attr_name, attr_value in nodo.__dict__.items():
+                if attr_name != "linea":
+                    self.visitar_nodo(attr_value)
+
+    def visitar_Programa(self, nodo):
+        """Visitar nodo Programa"""
+        for instruccion in nodo.instrucciones:
+            self.visitar_nodo(instruccion)
+
+    def visitar_DeclaracionVariable(self, nodo):
+        """Visitar declaración de variable"""
+        tipo_valor = "nulo"
+        valor = None
+
+        if nodo.valor is not None:
+            tipo_valor, valor = self.evaluar_expresion(nodo.valor)
+
+        simbolo = Simbolo(
+            nombre=nodo.nombre,
+            tipo=tipo_valor,
+            valor=valor,
+            linea=nodo.linea,
+            es_constante=False,
+            declarado=True,  # Marcamos como declarada
+        )
+
+        if not self.declarar_simbolo(simbolo):
+            self.error(
+                f"Variable '{nodo.nombre}' ya declarada en este ámbito", nodo.linea
+            )
+
+    def visitar_AsignacionVariable(self, nodo):
+        """Visitar asignación de variable"""
+        print(f"Visitando asignación de variable: {nodo.nombre}")  # Debug log
+        simbolo = self.buscar_simbolo(nodo.nombre)
+
+        if not simbolo:
+            self.error(f"Variable '{nodo.nombre}' no declarada", nodo.linea)
+            return
+
+        if not simbolo.declarado:
+            self.error(
+                f"Variable '{nodo.nombre}' usada antes de ser declarada", nodo.linea
+            )
+            return
+
+        tipo_valor, valor = self.evaluar_expresion(nodo.valor)
+        simbolo.tipo = tipo_valor
+        simbolo.valor = valor
+        simbolo.inicializado = True
+
+    def visitar_DeclaracionArreglo(self, nodo):
+        """Visitar declaración de arreglo"""
+        elementos_tipos = []
+        elementos_evaluados = []
+
+        for elemento in nodo.elementos:
+            tipo_elem, valor_elem = self.evaluar_expresion(elemento)
+            elementos_tipos.append(tipo_elem)
+            elementos_evaluados.append(valor_elem)
+
+        # Verificar que todos los elementos sean del mismo tipo
+        if elementos_tipos and len(set(elementos_tipos)) > 1:
+            self.advertencia(
+                f"Arreglo '{nodo.nombre}' contiene elementos de tipos diferentes",
+                nodo.linea,
+            )
+
+        # Determinar el tipo del arreglo
+        if elementos_tipos:
+            tipo_elemento = elementos_tipos[0]
+            tipo_arreglo = f"arreglo<{tipo_elemento}>"
+        else:
+            tipo_arreglo = "arreglo<desconocido>"
+
+        simbolo = Simbolo(
+            nombre=nodo.nombre,
+            tipo=tipo_arreglo,
+            valor=elementos_evaluados,
+            linea=nodo.linea,
+            es_constante=True,
+        )
+
+        if not self.declarar_simbolo(simbolo):
+            self.error(
+                f"Arreglo '{nodo.nombre}' ya declarado en este ámbito", nodo.linea
+            )
+
+    def visitar_DeclaracionTabla(self, nodo):
+        """Visitar declaración de tabla"""
+        tabla_valor = {}
+
+        for clave, valor in nodo.pares:
+            tipo_clave = self.inferir_tipo(clave)
+            if tipo_clave != "cadena":
+                self.error(f"Clave de tabla debe ser cadena", nodo.linea)
+
+            tipo_valor, valor_evaluado = self.evaluar_expresion(valor)
+            tabla_valor[clave] = valor_evaluado
+
+        simbolo = Simbolo(
+            nombre=nodo.nombre,
+            tipo="tabla",
+            valor=tabla_valor,
+            linea=nodo.linea,
+            es_constante=True,
+        )
+
+        if not self.declarar_simbolo(simbolo):
+            self.error(f"Tabla '{nodo.nombre}' ya declarada en este ámbito", nodo.linea)
+
+    def visitar_EstructuraSi(self, nodo):
+        """Visitar estructura si"""
+        tipo_condicion, _ = self.evaluar_expresion(nodo.condicion)
+        if tipo_condicion != "booleano":
+            self.error(f"Condición de 'si' debe ser booleana", nodo.linea)
+
+        self.nuevo_ambito()
+        self.visitar_nodo(nodo.bloque)
+        self.cerrar_ambito()
+
+        if hasattr(nodo, "sinosis") and nodo.sinosis:
+            self.visitar_nodo(nodo.sinosis)
+
+    def visitar_EstructuraMientras(self, nodo):
+        """Visitar estructura mientras"""
+        tipo_condicion, _ = self.evaluar_expresion(nodo.condicion)
+        if tipo_condicion != "booleano":
+            self.error(f"Condición de 'mientras' debe ser booleana", nodo.linea)
+
+        self.bucles_anidados += 1
+        self.nuevo_ambito()
+        self.visitar_nodo(nodo.bloque)
+        self.cerrar_ambito()
+        self.bucles_anidados -= 1
+
+    def visitar_EstructuraPara(self, nodo):
+        """Visitar estructura para"""
+        self.bucles_anidados += 1
+        self.nuevo_ambito()
+
+        # Declarar variable de inicialización
+        self.visitar_nodo(nodo.init)
+
+        # Verificar condición
+        tipo_condicion, _ = self.evaluar_expresion(nodo.condicion)
+        if tipo_condicion != "booleano":
+            self.error(f"Condición de 'para' debe ser booleana", nodo.linea)
+
+        # Verificar incremento
+        self.evaluar_expresion(nodo.incremento)
+
+        # Visitar bloque
+        self.visitar_nodo(nodo.bloque)
+
+        self.cerrar_ambito()
+        self.bucles_anidados -= 1
+
+    def visitar_EstructuraRepetir(self, nodo):
+        """Visitar estructura repetir"""
+        self.bucles_anidados += 1
+        self.nuevo_ambito()
+        self.visitar_nodo(nodo.bloque)
+        self.cerrar_ambito()
+
+        tipo_condicion, _ = self.evaluar_expresion(nodo.condicion)
+        if tipo_condicion != "booleano":
+            self.error(f"Condición de 'repetir-hasta' debe ser booleana", nodo.linea)
+
+        self.bucles_anidados -= 1
+
+    def visitar_DeclaracionFuncion(self, nodo):
+        """Visitar declaración de función"""
+        # Verificar que la función no esté ya declarada
+        if nodo.nombre in self.funciones_declaradas:
+            self.error(f"Función '{nodo.nombre}' ya declarada", nodo.linea)
+            return
+
+        simbolo = Simbolo(
+            nombre=nodo.nombre,
+            tipo="funcion",
+            parametros=nodo.parametros,
+            tipo_retorno=(
+                "nulo"
+                if not hasattr(nodo, "retorno") or nodo.retorno is None
+                else "desconocido"
+            ),
+            linea=nodo.linea,
+        )
+
+        self.funciones_declaradas[nodo.nombre] = simbolo
+        self.declarar_simbolo(simbolo)
+
+        # Analizar cuerpo de la función
+        self.nuevo_ambito()
+        self.en_funcion = True
+        anterior_tipo_retorno = self.tipo_retorno_esperado
+
+        # Declarar parámetros en el ámbito de la función
+        for param in nodo.parametros:
+            param_simbolo = Simbolo(
+                nombre=param,
+                tipo="desconocido",  # Tipo inferido en uso
+                linea=nodo.linea,
+            )
+            self.declarar_simbolo(param_simbolo)
+
+        # Visitar bloque de la función
+        self.visitar_nodo(nodo.bloque)
+
+        # Verificar retorno si existe
+        if hasattr(nodo, "retorno") and nodo.retorno:
+            tipo_retorno, _ = self.evaluar_expresion(nodo.retorno)
+            simbolo.tipo_retorno = tipo_retorno
+
+        self.tipo_retorno_esperado = anterior_tipo_retorno
+        self.en_funcion = False
+        self.cerrar_ambito()
+
+    def visitar_Imprimir(self, nodo):
+        """Visitar instrucción imprimir"""
+        for elemento in nodo.elementos:
+            self.evaluar_expresion(elemento)
+
+    def visitar_ExpresionBinaria(self, nodo):
+        """Visitar expresión binaria"""
+        self.evaluar_expresion_binaria(nodo)
+
+    def visitar_ExpresionUnaria(self, nodo):
+        """Visitar expresión unaria"""
+        self.evaluar_expresion_unaria(nodo)
+
+    def visitar_AccesoArreglo(self, nodo):
+        """Visitar acceso a arreglo"""
+        nombre = nodo.nombre if hasattr(nodo, "nombre") else str(nodo.arreglo)
+        simbolo = self.buscar_simbolo(nombre)
+        linea = getattr(nodo, "linea", None)
+
+        if not simbolo:
+            self.error(f"Arreglo '{nombre}' no declarado", linea)
+            return
+
+        if not simbolo.tipo.startswith("arreglo") and simbolo.tipo != "arreglo":
+            self.error(f"'{nombre}' no es un arreglo", linea)
+            return
+
+        simbolo.usado = True
+        tipo_indice, valor_indice = self.evaluar_expresion(nodo.indice)
+
+        if tipo_indice != "entero":
+            self.error(f"El índice de arreglo debe ser entero", linea)
+            return
+
+    def visitar_AccesoTabla(self, nodo):
+        """Visitar acceso a tabla"""
+        nombre = nodo.nombre if hasattr(nodo, "nombre") else str(nodo.tabla)
+        simbolo = self.buscar_simbolo(nombre)
+        linea = getattr(nodo, "linea", None)
+
+        if not simbolo:
+            self.error(f"Tabla '{nombre}' no declarada", linea)
+            return
+
+        if simbolo.tipo != "tabla":
+            self.error(f"'{nombre}' no es una tabla", linea)
+            return
+
+        simbolo.usado = True
+        tipo_clave, _ = self.evaluar_expresion(nodo.clave)
+        if tipo_clave != "cadena":
+            self.error(f"Clave de tabla debe ser cadena", linea)
+
+    def analizar(self, ast, codigo: str = "") -> ResultadoAnalisisSemantico:
+        """Realizar análisis semántico completo"""
+        self.codigo_fuente = codigo
+        self.errores = []
+        self.advertencias = []
+        self.tabla_simbolos = {}
+        self.ambitos = [{}]
+        self.funciones_declaradas = {}
+
+        try:
+            self.visitar_nodo(ast)
+
+            # Verificaciones finales
+            self.verificaciones_finales()
+
+        except Exception as e:
+            self.error(f"Error interno en análisis semántico: {str(e)}")
+
+        # Convertir tabla de símbolos a formato serializable
+        tabla_serializable = {}
+        for nombre, simbolo in self.tabla_simbolos.items():
+            tabla_serializable[nombre] = simbolo.to_dict()
+
+        return {
+            "errores": self.errores,
+            "advertencias": self.advertencias,
+            "tabla_simbolos": tabla_serializable,
+        }
+
+    def verificaciones_finales(self):
+        """Realizar verificaciones finales"""
+        # Verificar variables no utilizadas
+        for simbolo in self.tabla_simbolos.values():
+            if not simbolo.usado and simbolo.tipo != "funcion":
+                self.advertencia(
+                    f"Variable '{simbolo.nombre}' declarada pero no utilizada",
+                    simbolo.linea,
+                )
+
+        # Verificar funciones declaradas pero no utilizadas
+        for simbolo in self.funciones_declaradas.values():
+            if not simbolo.usado:
+                self.advertencia(
+                    f"Función '{simbolo.nombre}' declarada pero no utilizada",
+                    simbolo.linea,
+                )
+
+
+# Funciones de utilidad para integración
+def crear_analizador_semantico():
+    """Crear una nueva instancia del analizador semántico"""
+    return AnalizadorSemantico()
